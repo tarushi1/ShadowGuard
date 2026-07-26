@@ -1,0 +1,46 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---- Secrets & local config ----
+# NEVER commit these. This project handles sensitive data by design;
+# a leaked .env in a DLP project is an embarrassing story to tell.
+.env
+.env.local
+*.pem
+*.key
+
+# ---- Database ----
+# The SQLite file contains real logged prompts. It is local-only data.
+*.db
+*.sqlite
+*.sqlite3
+
+# ---- Node / dashboard ----
+node_modules/
+dist/
+build/
+.vite/
+
+# ---- Evaluation artefacts ----
+# Keep the labelled corpus (it is source data), ignore generated results.
+evaluation/results/*
+!evaluation/results/.gitkeep
+
+# ---- Captured images ----
+# Screenshots pulled from the browser during OCR testing may contain
+# real secrets. Never version them.
+evaluation/data/images/
+*.uploaded.png
+
+# ---- OS / editor ----
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/settings.json
