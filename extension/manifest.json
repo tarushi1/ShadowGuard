@@ -9,13 +9,20 @@
     "default_title": "ShadowGuard AI"
   },
 
+  "background": {
+    "service_worker": "src/background/service_worker.js"
+  },
+
   "content_scripts": [
     {
       "matches": [
         "https://chatgpt.com/*",
         "https://chat.openai.com/*"
       ],
-      "js": ["src/content/content.js"],
+      "js": [
+        "src/shared/messages.js",
+        "src/content/content.js"
+      ],
       "run_at": "document_idle",
       "all_frames": false
     }

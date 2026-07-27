@@ -75,4 +75,29 @@
       `the composer. Expected at this stage; handled in Week 2.`
     );
   }
+
+  // ---------------------------------------------------------------
+  // Bridge check (Task 1.4)
+  // ---------------------------------------------------------------
+  // Prove the content script can reach the service worker and get a
+  // reply. In Week 3 this same call carries the user's prompt and the
+  // reply carries the risk verdict — only the payload changes.
+  //
+  // sendMessage returns a Promise in MV3, so we can await it. The
+  // older callback form still works but nests awkwardly once real
+  // async work is involved.
+  chrome.runtime
+    .sendMessage({
+      type: SG.MSG.PING,
+      payload: { host: location.hostname, sentAt: new Date().toISOString() },
+    })
+    .then((response) => {
+      console.log(`${TAG} bridge OK — reply from service worker:`, response);
+    })
+    .catch((error) => {
+      // The usual cause is the service worker failing to load at all
+      // (a syntax error in service_worker.js), which leaves nothing
+      // listening on the other end.
+      console.error(`${TAG} bridge FAILED:`, error.message);
+    });
 })();
