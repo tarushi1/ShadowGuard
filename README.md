@@ -18,12 +18,12 @@ It computes a risk score and decides whether to **allow**, **warn**, **redact**,
 |---|---|
 | **Last updated** | 2026-07-28 |
 | **Project root** | `/Users/arushitiwari/Desktop/ShadowGuard` |
-| **Git branch** | `main` (18 commits, working tree clean) |
-| **Current stage** | Stage 0 — Chrome extension. Week 1 complete; Week 2 in progress. |
-| **Completed** | Tasks 1.1 – 1.5 (all of Week 1), 2.1, 2.2, 2.3 — all **verified on chatgpt.com** |
-| **Next task** | **2.4 — inject the modal UI in a Shadow DOM** |
+| **Git branch** | `main` (20 commits, working tree clean) |
+| **Current stage** | Stage 0 complete (bar 2.6, deferred). Moving to Stage 1 — Python backend. |
+| **Completed** | Week 1 (1.1–1.5) and Week 2 (2.1–2.5) — all **verified on chatgpt.com**. 2.6 deferred to Week 6. |
+| **Next task** | **3.1 — install Python 3.12, create the venv, `pip install fastapi uvicorn`** |
 | **Deadline** | ~2026-09-20 (8 weeks from 2026-07-26) |
-| **Weeks elapsed** | ~0.3 of 8 |
+| **Weeks elapsed** | ~0.4 of 8 — ahead of plan |
 
 ### What actually runs today
 
@@ -31,7 +31,7 @@ Loading `extension/` unpacked into Chrome and opening `chatgpt.com` produces, in
 
 ```
  [ShadowGuard] ACTIVE            ← green badge
-[ShadowGuard] version    : 0.5.2
+[ShadowGuard] version    : 0.7.0
 [ShadowGuard] host       : chatgpt.com
 [ShadowGuard] frame      : top-level
 [ShadowGuard] adapter    : ChatGPT (chatgpt)
@@ -46,12 +46,17 @@ a red `SEND BLOCKED` group naming the trigger. Shift+Enter, IME composition, an 
 clicks outside the send button, and Enter outside the composer all pass through untouched.
 Switching conversations (SPA navigation, no page reload) logs `composer RE-attached`.
 
-`__sg.approve()` then replays the held send and the message actually goes — the full
-**intercept → hold → decide → replay** loop is closed. `__sg.discard()` drops it and leaves the
-text in the box for editing.
+**The full loop runs without touching the console.** A safe message replays silently and the user
+never knows ShadowGuard was there. A risky one raises the Shadow-DOM modal: **Cancel** blocks and
+leaves the text for editing, **Send anyway** replays it. At `block` severity there is no override
+button at all.
 
-There is no backend and no modal yet: the "decide" step is still a human typing into the console.
-Task 2.4 adds the modal, Week 3 replaces the guess with a real verdict.
+The verdict still comes from `placeholderVerdict()` — three substring checks in `content.js`,
+marked for deletion in Week 3. Detection logic stays out of the extension deliberately: the Python
+evaluation harness calls detectors directly, so anything written in JavaScript contributes nothing
+to the precision/recall numbers.
+
+Try it: `hello` sends straight through; `my password: hunter2` warns; `sk-proj-abc123def456` blocks.
 
 **Console handle for manual inspection** — switch the DevTools console context dropdown from `top`
 to **ShadowGuard AI** first, or these are undefined:
@@ -68,6 +73,8 @@ __sg.pending         // the held send, or null
 __sg.approve()       // stands in for the modal's "Proceed"
 __sg.discard()       // stands in for "Cancel"
 __sg.sendButton()    // where a replay would route right now
+__sg.modal           // the modal instance (its shadow root is closed — this is the only handle)
+__sg.demoModal(lvl)  // render the modal with sample data: low | medium | high | critical
 ```
 
 `console.debug` lines (the "why did this Enter pass through" messages) are hidden unless the
@@ -269,6 +276,7 @@ Content scripts load in the order listed in the manifest; each file depends on t
 | `extension/src/adapters/chatgpt.js` | **The only file that knows how ChatGPT is built.** Tiered composer/send-button selectors, `<textarea>` vs contenteditable text extraction, ProseMirror empty-state handling |
 | `extension/src/content/composer_watcher.js` | `MutationObserver` that discovers the composer and re-discovers it when SPA navigation detaches it. Reports selector-tier degradation |
 | `extension/src/content/interceptor.js` | Capture-phase `keydown` / `click` / `submit` listeners on `window` that cancel a send, plus the shared guards that decide when not to |
+| `extension/src/ui/modal.js` | The warning dialog. Closed Shadow DOM for style isolation, `<dialog>.showModal()` for top-layer rendering and free focus trapping. `show()` returns a promise resolving to the user's decision |
 | `extension/src/content/content.js` | World 2 orchestration only — no site knowledge, no discovery logic. Re-injection guard, adapter selection, debounced read instrumentation, `__sg` debug handle, PING across the bridge |
 | `extension/src/background/service_worker.js` | World 3. Lifecycle logging and the message router; replies PONG to PING |
 
@@ -367,15 +375,20 @@ Every task is independently testable — you know it works before moving on.
 | 2.1 Capture-phase `keydown` listener cancels Enter | Press Enter, nothing sends, console logs the text | ✅ |
 | 2.2 Intercept the send-button click path | Clicking the arrow is also blocked | ✅ |
 | 2.3 Replay the send programmatically after approval | Message sends after a fake "approve" | ✅ |
-| 2.4 Inject the modal UI (Shadow DOM) | Modal renders correctly over the page | ⬜ **next** |
-| 2.5 Wire modal → Cancel discards, Proceed sends | Full loop works with a hardcoded verdict | ⬜ |
-| 2.6 Paste and image-upload interception | Console shows pasted text and file bytes | ⬜ |
+| 2.4 Inject the modal UI (Shadow DOM) | Modal renders correctly over the page | ✅ |
+| 2.5 Wire modal → Cancel discards, Proceed sends | Full loop works with a hardcoded verdict | ✅ |
+| 2.6 Paste and image-upload interception | Console shows pasted text and file bytes | ⏭️ **deferred to Week 6** — see note |
+
+> **Why 2.6 is deferred.** Pasted text needs no special handling: the interceptor reads the
+> composer at *send* time, so it sees pasted content exactly as it sees typed content — already
+> covered and verified. The remaining half is capturing uploaded *images*, which is dead weight
+> until Tesseract exists. It is better built in Week 6, next to the OCR code that consumes it.
 
 ### Week 3 — Stage 1 + evaluation foundation
 
 | Task | Test | Status |
 |---|---|---|
-| 3.1 Python 3.12 + venv + `fastapi uvicorn` | `/docs` opens in the browser | ⬜ |
+| 3.1 Python 3.12 + venv + `fastapi uvicorn` | `/docs` opens in the browser | ⬜ **next** |
 | 3.2 `POST /api/v1/analyze` returning a stub verdict | `curl` gets JSON back | ⬜ |
 | 3.3 Connect extension → backend end-to-end | Real modal driven by a real HTTP response ← **first true milestone** | ⬜ |
 | 3.4 Regex detector module (API keys, cards, emails, IBAN, JWT) | Unit tests pass on positive + negative cases | ⬜ |
@@ -487,6 +500,11 @@ To be expanded for the report; recording as they come up:
 ## Git history
 
 ```
+cfeb89a  feat(extension): wire the modal to the send decision
+f0a6099  feat(extension): warning modal in a closed Shadow DOM
+ae553d3  fix(extension): name the three composer-attach cases distinctly
+5761587  fix(extension): upgrade to a better composer match when one mounts
+a6b7617  docs: update README for Task 2.3 (approved-send replay)
 9a85fcc  feat(extension): replay an approved send
 420079b  docs: update README for Task 2.2 (send-button interception)
 fcc1c18  feat(extension): close the send-button and form-submit paths
