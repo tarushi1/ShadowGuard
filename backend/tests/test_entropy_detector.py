@@ -197,3 +197,50 @@ def test_offsets_point_at_the_actual_token():
     finding = scan(text)[0]
 
     assert text[finding.start : finding.end] == token
+
+
+# ---------------------------------------------------------------
+# Known-safe classes — found by the evaluation harness
+# ---------------------------------------------------------------
+# Each of these was a real false positive on the labelled corpus. The
+# fixes are rules about CLASSES of identifier, not exclusions of the
+# particular strings that failed — that distinction is what separates
+# a principled improvement from overfitting to the test set.
+
+def test_content_digests_are_not_secrets():
+    """A hash of public content is public by construction."""
+    assert scan("npm reports integrity sha512-Kd8Fj3Nq7Wt2Yr5BvXz9Qm4Lp1Hs6Tg0Ue3") == []
+    assert scan("image digest sha256:9f2c1a44b7e3d8506a1c4f9b2e7d3a8c5f0b6e1d4a9c2f7b3") == []
+
+
+def test_vendor_test_keys_are_not_secrets():
+    """The regex stage already ignores these deliberately.
+
+    Entropy flagging the same string was an inconsistency in our own
+    design rather than a threshold to tune.
+    """
+    assert scan("use sk_test_51H8xKlMnOpQrStUvWxYz1234 in the staging environment") == []
+    assert scan("the publishable key is pk_test_51H8xKlMnOpQrStUvWxYz1234") == []
+
+
+def test_file_paths_do_not_fuse_into_a_token():
+    """Excluding '/' from the token charset.
+
+    Trade-off: standard base64 uses '/', so this costs some recall on
+    raw encoded blobs. The secrets that matter here use URL-safe
+    alphabets, and encoded blobs are out of scope for Stage 1.
+    """
+    assert scan("the s3 object key is uploads/2026/07/29/a7b3c9d1e5f2/report.pdf") == []
+
+
+def test_the_exclusions_do_not_disable_real_detection():
+    """The rules above must narrow the detector, not neuter it.
+
+    The risk with any exclusion list is that it quietly grows until
+    nothing is detected. A `sha512-` prefix is safe; the same random
+    body without it is not.
+    """
+    body = "Kd8Fj3Nq7Wt2Yr5BvXz9Qm4Lp1Hs6Tg0Ue3"
+
+    assert scan(f"integrity sha512-{body}") == []
+    assert body in flagged(f"the signing key is {body}")

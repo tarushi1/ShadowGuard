@@ -78,10 +78,18 @@ HEX_THRESHOLD = 3.5
 GENERAL_THRESHOLD = 4.2
 
 # Candidate tokens: runs of characters a secret could plausibly be
-# made of. Deliberately excludes '.' and ':' so that URLs, file paths
-# and version strings break into short fragments instead of forming
-# one long high-entropy token.
-_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9+/=_-]{%d,}" % MIN_TOKEN_LENGTH)
+# made of. Deliberately excludes '.', ':' and '/' so that URLs, file
+# paths and version strings break into short fragments instead of
+# forming one long high-entropy token.
+#
+# Excluding '/' is a trade-off, made after the evaluation harness
+# showed an S3 object key being flagged: `uploads/2026/07/29/a7b3c9d1
+# e5f2/report` fused into a single token that cleared every threshold.
+# Standard base64 does use '/', so this costs some recall on raw
+# encoded blobs — but the secrets that matter here (API keys, session
+# tokens, signing keys) overwhelmingly use URL-safe alphabets with '-'
+# and '_', and encoded blobs are explicitly out of scope for Stage 1.
+_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9+=_-]{%d,}" % MIN_TOKEN_LENGTH)
 
 _HEX_PATTERN = re.compile(r"\A[0-9a-fA-F]+\Z")
 
@@ -97,6 +105,38 @@ _UUID_PATTERN = re.compile(
 # SHA — an identifier people paste constantly and which reveals
 # nothing. Also covers SHA-1 digests.
 _GIT_SHA_PATTERN = re.compile(r"\A[0-9a-f]{40}\Z")
+
+# Prefixes that declare the token is NOT a secret.
+#
+# Two families, both principled rather than corpus-specific:
+#
+#   Content digests. A hash of public content is public by
+#   construction — npm integrity strings, docker image digests,
+#   checksums. High entropy by design, secret by nobody's definition.
+#
+#   Vendor test and publishable keys. `sk_test_` and `pk_*` are
+#   documented by Stripe as safe to expose. The regex stage already
+#   ignores them deliberately; entropy flagging the same string was an
+#   inconsistency in our own design, not a tuning question.
+#
+# The distinction that keeps this from being overfitting: these are
+# rules about CLASSES of identifier that generalise beyond the corpus.
+# Excluding a literal string that happened to fail would not.
+_SAFE_PREFIXES = (
+    "sha1-", "sha256-", "sha384-", "sha512-",
+    "md5-", "crc32-",
+    "sk_test_", "pk_test_", "pk_live_",
+)
+
+# The same digest markers, written with a colon — `sha256:9f2c...` in
+# docker output. The colon is not in the token charset, so the token
+# itself carries no evidence and we have to look at what precedes it.
+_DIGEST_MARKERS = ("sha1:", "sha256:", "sha384:", "sha512:", "md5:", "digest:")
+
+# How far back to look for one of those markers. Long enough for
+# "sha256:", short enough that an unrelated word several tokens away
+# cannot suppress a real finding.
+_LOOKBACK = 10
 
 
 def shannon_entropy(text: str) -> float:
@@ -134,9 +174,21 @@ def character_classes(text: str) -> int:
     )
 
 
-def _is_known_safe(token: str) -> bool:
-    """Random by design, harmless by nature."""
-    return bool(_UUID_PATTERN.match(token) or _GIT_SHA_PATTERN.match(token))
+def _is_known_safe(token: str, preceding: str = "") -> bool:
+    """Random by design, harmless by nature.
+
+    :param token: the candidate string
+    :param preceding: the few characters before it, for markers like
+                      `sha256:` that the token charset splits away
+    """
+    if _UUID_PATTERN.match(token) or _GIT_SHA_PATTERN.match(token):
+        return True
+
+    lowered = token.lower()
+    if lowered.startswith(_SAFE_PREFIXES):
+        return True
+
+    return preceding.lower().endswith(_DIGEST_MARKERS)
 
 
 def _confidence_for(entropy: float, threshold: float, classes: int) -> float:
@@ -172,8 +224,9 @@ def scan(text: str) -> list[Finding]:
 
     for match in _TOKEN_PATTERN.finditer(text):
         token = match.group(0)
+        preceding = text[max(0, match.start() - _LOOKBACK) : match.start()]
 
-        if _is_known_safe(token):
+        if _is_known_safe(token, preceding):
             continue
 
         # Single-class tokens are words, identifiers or plain digit
