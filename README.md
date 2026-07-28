@@ -18,10 +18,10 @@ It computes a risk score and decides whether to **allow**, **warn**, **redact**,
 |---|---|
 | **Last updated** | 2026-07-28 |
 | **Project root** | `/Users/arushitiwari/Desktop/ShadowGuard` |
-| **Git branch** | `main` (9 commits, working tree clean) |
+| **Git branch** | `main` (12 commits, working tree clean) |
 | **Current stage** | Stage 0 — Chrome extension. Week 1 complete; Week 2 in progress. |
-| **Completed** | Tasks 1.1 – 1.5 (all of Week 1), 2.1 |
-| **Next task** | **2.2 — intercept the send-button click path** |
+| **Completed** | Tasks 1.1 – 1.5 (all of Week 1), 2.1, 2.2 |
+| **Next task** | **2.3 — replay the send programmatically after approval** |
 | **Deadline** | ~2026-09-20 (8 weeks from 2026-07-26) |
 | **Weeks elapsed** | ~0.3 of 8 |
 
@@ -31,22 +31,23 @@ Loading `extension/` unpacked into Chrome and opening `chatgpt.com` produces, in
 
 ```
  [ShadowGuard] ACTIVE            ← green badge
-[ShadowGuard] version    : 0.3.0
+[ShadowGuard] version    : 0.4.0
 [ShadowGuard] host       : chatgpt.com
 [ShadowGuard] frame      : top-level
 [ShadowGuard] adapter    : ChatGPT (chatgpt)
 [ShadowGuard] composer matched at tier 1/5 via "#prompt-textarea"
 [ShadowGuard] composer attached: <div id="prompt-textarea" …>
- [ShadowGuard] INTERCEPTING ENTER 
+ [ShadowGuard] INTERCEPTING  keydown · click · submit — all send paths closed
 [ShadowGuard] bridge OK — reply from service worker: {type: "SG_PONG", …}
 ```
 
-Pressing **Enter** with text in the composer cancels the send and logs a red `SEND BLOCKED` group.
-Shift+Enter, IME composition, an empty composer, and Enter outside the composer all pass through.
+**All three send paths are closed** — Enter, the send-button click, and form submission. Each logs
+a red `SEND BLOCKED` group naming the trigger. Shift+Enter, IME composition, an empty composer,
+clicks outside the send button, and Enter outside the composer all pass through untouched.
 Switching conversations (SPA navigation, no page reload) logs `composer RE-attached`.
 
-There is no backend yet and **no way to send an approved message** — the tab is one-way until you
-call `__sg.disable()`. Task 2.3 adds the replay.
+There is no backend yet and **no way to send an approved message** — the tab is fully one-way until
+you call `__sg.disable()`. This is the maximally-blocked state; Task 2.3 builds the release valve.
 
 **Console handle for manual inspection** — switch the DevTools console context dropdown from `top`
 to **ShadowGuard AI** first, or these are undefined:
@@ -259,7 +260,7 @@ Content scripts load in the order listed in the manifest; each file depends on t
 | `extension/src/adapters/registry.js` | `registerAdapter()` / `resolveAdapter()`. Exact-hostname matching, not substring — substring matching is how extensions end up running on `chatgpt.evil-site.com` |
 | `extension/src/adapters/chatgpt.js` | **The only file that knows how ChatGPT is built.** Tiered composer/send-button selectors, `<textarea>` vs contenteditable text extraction, ProseMirror empty-state handling |
 | `extension/src/content/composer_watcher.js` | `MutationObserver` that discovers the composer and re-discovers it when SPA navigation detaches it. Reports selector-tier degradation |
-| `extension/src/content/interceptor.js` | Capture-phase `keydown` listener on `window` that cancels a send, plus the five guards that decide when not to |
+| `extension/src/content/interceptor.js` | Capture-phase `keydown` / `click` / `submit` listeners on `window` that cancel a send, plus the shared guards that decide when not to |
 | `extension/src/content/content.js` | World 2 orchestration only — no site knowledge, no discovery logic. Re-injection guard, adapter selection, debounced read instrumentation, `__sg` debug handle, PING across the bridge |
 | `extension/src/background/service_worker.js` | World 3. Lifecycle logging and the message router; replies PONG to PING |
 
@@ -295,6 +296,17 @@ Content scripts load in the order listed in the manifest; each file depends on t
 7. **IME guard (`isComposing` / `keyCode === 229`).** For Japanese, Chinese and Korean input, Enter
    *confirms the IME candidate* rather than sending. Swallowing it would make ShadowGuard unusable
    for a large share of the world's users — an internationalisation correctness issue, not a nicety.
+8. **`closest()`, never `matches()`, for the send button.** The arrow is a `<button>` wrapping an
+   `<svg>` wrapping a `<path>`, and the browser reports the innermost element under the cursor — so
+   `event.target.matches(buttonSelector)` is false essentially always and fails *silently*.
+   `closest()` walks up the ancestors and finds the button however deep you clicked.
+9. **Event delegation over stored references.** Nothing holds a reference to the send button,
+   because the platform remounts it constantly (it swaps to a *stop* button while a reply streams).
+   We ask "did this click originate inside a send button?" per event, which is immune to remounting
+   by construction — the same reasoning as the composer watcher, applied to a shorter-lived element.
+10. **Three send paths, one guard set.** `keydown`, `click` and `submit` all route through
+   `#sharedGuards()`. Duplicating guards across three handlers is how one drifts out of sync,
+   producing a bug that only reproduces when the user sends one particular way.
 
 ### Permissions currently requested: **none**
 
@@ -333,8 +345,8 @@ Every task is independently testable — you know it works before moving on.
 | Task | Test | Status |
 |---|---|---|
 | 2.1 Capture-phase `keydown` listener cancels Enter | Press Enter, nothing sends, console logs the text | ✅ |
-| 2.2 Intercept the send-button click path | Clicking the arrow is also blocked | ⬜ **next** |
-| 2.3 Replay the send programmatically after approval | Message sends after a fake "approve" | ⬜ |
+| 2.2 Intercept the send-button click path | Clicking the arrow is also blocked | ✅ |
+| 2.3 Replay the send programmatically after approval | Message sends after a fake "approve" | ⬜ **next** |
 | 2.4 Inject the modal UI (Shadow DOM) | Modal renders correctly over the page | ⬜ |
 | 2.5 Wire modal → Cancel discards, Proceed sends | Full loop works with a hardcoded verdict | ⬜ |
 | 2.6 Paste and image-upload interception | Console shows pasted text and file bytes | ⬜ |
@@ -447,6 +459,9 @@ To be expanded for the report; recording as they come up:
 ## Git history
 
 ```
+fcc1c18  feat(extension): close the send-button and form-submit paths
+ca9f092  docs: correct version string in README console sample
+858b929  docs: update README for Task 2.1 (Enter interception)
 cbe13bb  feat(extension): cancel Enter before ChatGPT can send
 1ae1803  docs: update README for Task 1.5 (composer discovery)
 d895312  feat(extension): locate ChatGPT composer via adapter + MutationObserver
