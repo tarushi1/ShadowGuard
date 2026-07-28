@@ -183,7 +183,12 @@ globalThis.SG.ComposerWatcher = class ComposerWatcher {
       );
     }
 
-    const reattached = this.current !== null;
+    // Name the three cases distinctly. Reporting an upgrade as "SPA
+    // navigation" sends you looking for a navigation that never
+    // happened; a log that lies costs more than no log at all.
+    const reason =
+      this.current === null ? "initial" : connected ? "upgrade" : "reattach";
+
     this.current = found.element;
 
     if (found.tier !== this.lastTier) {
@@ -198,6 +203,6 @@ globalThis.SG.ComposerWatcher = class ComposerWatcher {
       this.lastTier = found.tier;
     }
 
-    this.onAttach(found.element, { ...found, reattached });
+    this.onAttach(found.element, { ...found, reason });
   }
 };

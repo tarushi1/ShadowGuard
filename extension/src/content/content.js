@@ -95,12 +95,15 @@
   /** @type {HTMLElement|null} the live composer, maintained by the watcher */
   let composer = null;
 
+  const REASON_LABEL = {
+    initial: "attached",
+    reattach: "RE-attached (SPA navigation)",
+    upgrade: "swapped to a better match (fallback → real editor)",
+  };
+
   const watcher = new SG.ComposerWatcher(adapter, (element, info) => {
     composer = element;
-    console.log(
-      `${TAG} composer ${info.reattached ? "RE-attached (SPA navigation)" : "attached"}:`,
-      element
-    );
+    console.log(`${TAG} composer ${REASON_LABEL[info.reason]}:`, element);
   });
 
   watcher.start();
