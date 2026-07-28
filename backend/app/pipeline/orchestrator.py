@@ -22,6 +22,8 @@ neither does the extension.
 import time
 import uuid
 
+from ..detectors import regex_detector
+from ..detectors.base import Finding
 from ..schemas.analyze import (
     Action,
     AnalyzeRequest,
@@ -29,6 +31,28 @@ from ..schemas.analyze import (
     DetectedEntity,
     RiskLevel,
 )
+
+# ---------------------------------------------------------------
+# Severity → verdict
+# ---------------------------------------------------------------
+# PLACEHOLDER, replaced by the real risk engine in Week 5.
+#
+# Today the verdict is simply the worst severity found. That is a
+# reasonable Stage-1 policy — a private key is a private key — but it
+# cannot weigh evidence: two medium signals plus unusual behaviour
+# should outrank one medium signal, and this cannot express that.
+# Week 5 turns it into weighted fusion over all stages.
+#
+# Kept as data rather than an if-chain so the eventual replacement has
+# something concrete to compare against in the report.
+_SEVERITY_VERDICT: dict[str, tuple[Action, RiskLevel, int]] = {
+    "critical": (Action.BLOCK, RiskLevel.CRITICAL, 95),
+    "high": (Action.WARN, RiskLevel.HIGH, 75),
+    "medium": (Action.WARN, RiskLevel.MEDIUM, 50),
+    "low": (Action.ALLOW, RiskLevel.LOW, 20),
+}
+
+_NOTHING_FOUND = (Action.ALLOW, RiskLevel.LOW, 0)
 
 
 def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
@@ -53,53 +77,36 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
     request_id = uuid.uuid4().hex[:12]
 
     stages_run: list[str] = []
-    entities: list[DetectedEntity] = []
 
-    # =============================================================
-    # STUB — replaced in Task 3.4 by the real Stage 1 detectors.
-    #
-    # Two substring checks, in Python rather than JavaScript, so that
-    # the shape of the pipeline can be tested end to end before any
-    # detection exists. It lives here rather than in the route so the
-    # swap in 3.4 touches exactly one function.
-    #
-    # It is not a detector and must not grow into one: no regex
-    # library, no scoring model, no config. Task 3.4 deletes it.
-    # =============================================================
-    text = request.text
-    stages_run.append("stub")
+    # ---- Stage 1a: pattern detection ----------------------------
+    # Sub-millisecond and near-perfect on structured secrets, so it
+    # always runs first. Stages 2-4 arrive in later tasks; when they
+    # do, a critical finding here will short-circuit them, and
+    # `stages_run` is what makes that visible rather than claimed.
+    stages_run.append("regex")
+    findings: list[Finding] = regex_detector.scan(request.text)
 
-    if "sk-" in text or "BEGIN PRIVATE KEY" in text:
-        action, level, score = Action.BLOCK, RiskLevel.CRITICAL, 95
-        message = "A credential was detected in this message. Sending has been blocked."
-        entities.append(
-            DetectedEntity(
-                type="STUB_SECRET",
-                start=max(text.find("sk-"), 0),
-                end=max(text.find("sk-"), 0) + 3,
-                score=1.0,
-                detector="stub",
-            )
+    severity = regex_detector.highest_severity(findings)
+    action, level, score = _SEVERITY_VERDICT.get(severity, _NOTHING_FOUND)
+
+    # ---- Convert internal findings to the API shape -------------
+    # This is where `value` is dropped. Findings carry the matched
+    # text because the entropy stage scores it and Week 5's redaction
+    # replaces it; the response carries offsets only, because a reply
+    # containing the secret would put a copy in every HTTP log and
+    # proxy cache between here and the browser.
+    entities = [
+        DetectedEntity(
+            type=f.type,
+            start=f.start,
+            end=f.end,
+            score=f.score,
+            detector=f.detector,
         )
-    elif "password" in text.lower():
-        action, level, score = Action.WARN, RiskLevel.HIGH, 70
-        message = (
-            "This message appears to contain credential-like content. "
-            "Review it before sending."
-        )
-        entities.append(
-            DetectedEntity(
-                type="STUB_CREDENTIAL",
-                start=max(text.lower().find("password"), 0),
-                end=max(text.lower().find("password"), 0) + 8,
-                score=0.8,
-                detector="stub",
-            )
-        )
-    else:
-        action, level, score = Action.ALLOW, RiskLevel.LOW, 0
-        message = "No sensitive content detected."
-    # ============================ end stub =======================
+        for f in findings
+    ]
+
+    message = _describe(findings, action)
 
     # Measured around the detection work only, excluding FastAPI's
     # request parsing and response serialisation. That keeps the number
@@ -117,4 +124,42 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
         redacted_text=None,
         latency_ms=round(latency_ms, 3),
         stages_run=stages_run,
+    )
+
+
+def _describe(findings: list[Finding], action: Action) -> str:
+    """Write the sentence the user reads in the modal.
+
+    Names the entity TYPES and never the matched values. A warning
+    that quotes the secret back would put it on screen — often on a
+    shared screen, in a recording, or in a screenshot pasted into a
+    ticket — which is the same mistake as logging it.
+
+    Wording matters more than it looks. "We found something" trains
+    people to click through; naming what was found and why gives them
+    enough to make an actual decision, which is the difference between
+    a control people respect and one they learn to dismiss.
+    """
+    if not findings:
+        return "No sensitive content detected."
+
+    # Preserve first-appearance order rather than sorting: it matches
+    # what the user sees in their own message.
+    seen: list[str] = []
+    for finding in findings:
+        label = finding.type.replace("_", " ").lower()
+        if label not in seen:
+            seen.append(label)
+
+    listed = seen[0] if len(seen) == 1 else f"{', '.join(seen[:-1])} and {seen[-1]}"
+
+    if action is Action.BLOCK:
+        return (
+            f"This message contains {listed}. Sending has been blocked — "
+            f"remove it before trying again."
+        )
+
+    return (
+        f"This message appears to contain {listed}. "
+        f"Review it before sending."
     )
