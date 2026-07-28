@@ -44,3 +44,5 @@ evaluation/data/images/
 .idea/
 .vscode/*
 !.vscode/settings.json
+
+# Tool-permission approvals are per-machine, not project source.
