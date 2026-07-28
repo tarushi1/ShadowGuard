@@ -18,7 +18,7 @@ It computes a risk score and decides whether to **allow**, **warn**, **redact**,
 |---|---|
 | **Last updated** | 2026-07-28 |
 | **Project root** | `/Users/arushitiwari/Desktop/ShadowGuard` |
-| **Git branch** | `main` (4 commits, working tree clean) |
+| **Git branch** | `main` (6 commits, working tree clean) |
 | **Current stage** | Stage 0 — Chrome extension scaffolding |
 | **Completed** | Tasks 1.1 – 1.4 |
 | **Next task** | **1.5 — locate ChatGPT's composer element reliably** |
@@ -384,6 +384,8 @@ To be expanded for the report; recording as they come up:
 ## Git history
 
 ```
+1941d40  chore: ignore .claude/ local tool-permission state
+dc124df  docs: add README as living session-recovery document
 06d0ca3  feat(extension): add service worker and content<->worker message bridge
 17a6640  feat(extension): inject content script into ChatGPT
 9214afa  feat(extension): add minimal Manifest V3 declaration
