@@ -18,10 +18,10 @@ It computes a risk score and decides whether to **allow**, **warn**, **redact**,
 |---|---|
 | **Last updated** | 2026-07-28 |
 | **Project root** | `/Users/arushitiwari/Desktop/ShadowGuard` |
-| **Git branch** | `main` (12 commits, working tree clean) |
+| **Git branch** | `main` (15 commits, working tree clean) |
 | **Current stage** | Stage 0 — Chrome extension. Week 1 complete; Week 2 in progress. |
-| **Completed** | Tasks 1.1 – 1.5 (all of Week 1), 2.1, 2.2 |
-| **Next task** | **2.3 — replay the send programmatically after approval** |
+| **Completed** | Tasks 1.1 – 1.5 (all of Week 1), 2.1, 2.2, 2.3 |
+| **Next task** | **2.4 — inject the modal UI in a Shadow DOM** |
 | **Deadline** | ~2026-09-20 (8 weeks from 2026-07-26) |
 | **Weeks elapsed** | ~0.3 of 8 |
 
@@ -31,7 +31,7 @@ Loading `extension/` unpacked into Chrome and opening `chatgpt.com` produces, in
 
 ```
  [ShadowGuard] ACTIVE            ← green badge
-[ShadowGuard] version    : 0.4.0
+[ShadowGuard] version    : 0.5.0
 [ShadowGuard] host       : chatgpt.com
 [ShadowGuard] frame      : top-level
 [ShadowGuard] adapter    : ChatGPT (chatgpt)
@@ -46,8 +46,12 @@ a red `SEND BLOCKED` group naming the trigger. Shift+Enter, IME composition, an 
 clicks outside the send button, and Enter outside the composer all pass through untouched.
 Switching conversations (SPA navigation, no page reload) logs `composer RE-attached`.
 
-There is no backend yet and **no way to send an approved message** — the tab is fully one-way until
-you call `__sg.disable()`. This is the maximally-blocked state; Task 2.3 builds the release valve.
+`__sg.approve()` then replays the held send and the message actually goes — the full
+**intercept → hold → decide → replay** loop is closed. `__sg.discard()` drops it and leaves the
+text in the box for editing.
+
+There is no backend and no modal yet: the "decide" step is still a human typing into the console.
+Task 2.4 adds the modal, Week 3 replaces the guess with a real verdict.
 
 **Console handle for manual inspection** — switch the DevTools console context dropdown from `top`
 to **ShadowGuard AI** first, or these are undefined:
@@ -60,6 +64,10 @@ __sg.watcher.find()  // {element, selector, tier}
 __sg.disable()       // stop blocking Enter, so the tab stays usable
 __sg.enable()        // resume blocking
 __sg.stats()         // {seen, intercepted, passed} — confirms guards fire
+__sg.pending         // the held send, or null
+__sg.approve()       // stands in for the modal's "Proceed"
+__sg.discard()       // stands in for "Cancel"
+__sg.sendButton()    // where a replay would route right now
 ```
 
 `console.debug` lines (the "why did this Enter pass through" messages) are hidden unless the
@@ -307,6 +315,18 @@ Content scripts load in the order listed in the manifest; each file depends on t
 10. **Three send paths, one guard set.** `keydown`, `click` and `submit` all route through
    `#sharedGuards()`. Duplicating guards across three handlers is how one drifts out of sync,
    producing a bug that only reproduces when the user sends one particular way.
+11. **Replay re-triggers the send; it does not rebuild the message.** We cancelled the send *event*,
+   never the text — it is still in the composer and React's state already holds it, because React
+   saw every keystroke. This is why the well-known native-value-setter workaround for React
+   controlled inputs is *not* needed here. It belongs to Week 5's `redact` action, the only case
+   that rewrites the user's text.
+12. **Replay clicks the platform's own send button.** Everything ChatGPT does on send — clearing the
+   box, optimistic UI, scrolling, analytics — then happens exactly as it normally would. Falls back
+   to a synthetic bubbling Enter only when the button is missing, disabled, or has been swapped for
+   the *stop* control mid-stream (clicking that would abort the reply instead of sending).
+13. **No auto-retry on a failed replay.** Post-send verification warns if the composer did not
+   clear, but never resends. Retrying a failed action is good practice in most apps; in a DLP tool
+   it means the message you were *already unsure about* gets sent twice.
 
 ### Permissions currently requested: **none**
 
@@ -346,8 +366,8 @@ Every task is independently testable — you know it works before moving on.
 |---|---|---|
 | 2.1 Capture-phase `keydown` listener cancels Enter | Press Enter, nothing sends, console logs the text | ✅ |
 | 2.2 Intercept the send-button click path | Clicking the arrow is also blocked | ✅ |
-| 2.3 Replay the send programmatically after approval | Message sends after a fake "approve" | ⬜ **next** |
-| 2.4 Inject the modal UI (Shadow DOM) | Modal renders correctly over the page | ⬜ |
+| 2.3 Replay the send programmatically after approval | Message sends after a fake "approve" | ✅ |
+| 2.4 Inject the modal UI (Shadow DOM) | Modal renders correctly over the page | ⬜ **next** |
 | 2.5 Wire modal → Cancel discards, Proceed sends | Full loop works with a hardcoded verdict | ⬜ |
 | 2.6 Paste and image-upload interception | Console shows pasted text and file bytes | ⬜ |
 
@@ -454,11 +474,21 @@ To be expanded for the report; recording as they come up:
 - **False negatives are the security failure; false positives are the adoption failure.** A tool
   that cries wolf gets disabled. This is precisely what the Week 3 evaluation harness measures.
 
+### Known bypasses — track these, they belong in the report
+
+| Bypass | Status |
+|---|---|
+| **Edit-after-analysis.** The composer stays editable while a decision is pending, so a user can trip the warning with benign text, paste a secret while the modal is open, then click Proceed — sending text that was never inspected. | Detected and warned in `approve()`; becomes re-analysis in Week 5 |
+| **`__sg.disable()`** is reachable from the page's own DevTools. Acceptable for a local prototype; in a real deployment the console handle would not ship. | By design, dev-only |
+| **Anything not going through the UI** — the ChatGPT API, a different client, a browser without the extension. The extension is a control on one path, not a perimeter. | Inherent to the approach; state it plainly |
+
 ---
 
 ## Git history
 
 ```
+9a85fcc  feat(extension): replay an approved send
+420079b  docs: update README for Task 2.2 (send-button interception)
 fcc1c18  feat(extension): close the send-button and form-submit paths
 ca9f092  docs: correct version string in README console sample
 858b929  docs: update README for Task 2.1 (Enter interception)
