@@ -31,7 +31,7 @@ Loading `extension/` unpacked into Chrome and opening `chatgpt.com` produces, in
 
 ```
  [ShadowGuard] ACTIVE            ← green badge
-[ShadowGuard] version    : 0.2.0
+[ShadowGuard] version    : 0.3.0
 [ShadowGuard] host       : chatgpt.com
 [ShadowGuard] frame      : top-level
 [ShadowGuard] adapter    : ChatGPT (chatgpt)
