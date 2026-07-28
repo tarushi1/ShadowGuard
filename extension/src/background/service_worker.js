@@ -61,7 +61,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         type: SG.MSG.PONG,
         receivedAt: new Date().toISOString(),
         echo: message.payload ?? null,
-        workerVersion: "0.1.0",
+        workerVersion: chrome.runtime.getManifest().version,
       });
       break;
     }
