@@ -2,7 +2,7 @@
   "manifest_version": 3,
 
   "name": "ShadowGuard AI",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "description": "Context-aware multimodal data loss prevention for enterprise interactions with generative AI platforms.",
 
   "action": {
@@ -25,6 +25,7 @@
         "src/adapters/chatgpt.js",
         "src/content/composer_watcher.js",
         "src/content/interceptor.js",
+        "src/ui/modal.js",
         "src/content/content.js"
       ],
       "run_at": "document_idle",

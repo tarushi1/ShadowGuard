@@ -109,6 +109,19 @@
   watcher.start();
 
   // ---------------------------------------------------------------
+  // Warning UI
+  // ---------------------------------------------------------------
+  // Built lazily on first show(), so a page that never triggers a
+  // warning never pays for the DOM. Its shadow root is closed, which
+  // means this instance is the only way to reach the dialog — page
+  // scripts cannot query our Proceed button and click it.
+  const modal = new SG.WarningModal();
+
+  // A pending decision is meaningless once the conversation changes
+  // underneath it: the composer we would replay into is gone.
+  window.addEventListener("popstate", () => modal.dismiss());
+
+  // ---------------------------------------------------------------
   // Send interception
   // ---------------------------------------------------------------
   // The interceptor asks for the composer through a getter rather
@@ -284,6 +297,50 @@
 
     /** Where would send() route right now? Useful when replay misbehaves. */
     sendButton: () => adapter.findSendButton(),
+
+    /** The modal instance. Its shadow root is closed, so this is the only handle. */
+    modal,
+
+    /**
+     * Render the modal with sample data, to check it visually without
+     * needing an interception or a backend. Task 2.5 replaces this
+     * with the real flow.
+     *
+     * @param {string} level  low | medium | high | critical
+     */
+    demoModal(level = "high") {
+      const samples = {
+        low: {
+          score: 18, entities: ["EMAIL_ADDRESS"],
+          message: "Minor personal data detected. Sending is allowed.",
+          preview: "contact me at alex@example.com",
+        },
+        medium: {
+          score: 47, entities: ["PERSON", "PHONE_NUMBER"],
+          message: "This message contains personal information about a named individual.",
+          preview: "Priya Raman, +44 7700 900123, account overdue",
+        },
+        high: {
+          score: 78, entities: ["AWS_ACCESS_KEY", "EMAIL_ADDRESS"],
+          message: "This message appears to contain a cloud credential and personal data.",
+          preview: "AKIA••••••••••••7Q2M  ·  ops@acme-internal.com",
+        },
+        critical: {
+          score: 96, entities: ["OPENAI_API_KEY", "PRIVATE_KEY"],
+          message:
+            "A live secret was detected. Sending has been blocked and the attempt logged.",
+          preview: "sk-proj-••••••••••••••••••••••••••••3f9A",
+          allowProceed: false,
+        },
+      };
+
+      return modal
+        .show({ level, ...samples[level] })
+        .then((decision) => {
+          console.log(`${TAG} demo modal decision:`, decision);
+          return decision;
+        });
+    },
   };
 
   // ---------------------------------------------------------------

@@ -18,9 +18,9 @@ It computes a risk score and decides whether to **allow**, **warn**, **redact**,
 |---|---|
 | **Last updated** | 2026-07-28 |
 | **Project root** | `/Users/arushitiwari/Desktop/ShadowGuard` |
-| **Git branch** | `main` (15 commits, working tree clean) |
+| **Git branch** | `main` (18 commits, working tree clean) |
 | **Current stage** | Stage 0 — Chrome extension. Week 1 complete; Week 2 in progress. |
-| **Completed** | Tasks 1.1 – 1.5 (all of Week 1), 2.1, 2.2, 2.3 |
+| **Completed** | Tasks 1.1 – 1.5 (all of Week 1), 2.1, 2.2, 2.3 — all **verified on chatgpt.com** |
 | **Next task** | **2.4 — inject the modal UI in a Shadow DOM** |
 | **Deadline** | ~2026-09-20 (8 weeks from 2026-07-26) |
 | **Weeks elapsed** | ~0.3 of 8 |
@@ -31,11 +31,11 @@ Loading `extension/` unpacked into Chrome and opening `chatgpt.com` produces, in
 
 ```
  [ShadowGuard] ACTIVE            ← green badge
-[ShadowGuard] version    : 0.5.0
+[ShadowGuard] version    : 0.5.2
 [ShadowGuard] host       : chatgpt.com
 [ShadowGuard] frame      : top-level
 [ShadowGuard] adapter    : ChatGPT (chatgpt)
-[ShadowGuard] composer matched at tier 1/5 via "#prompt-textarea"
+[ShadowGuard] composer matched at tier 1/6 via "#prompt-textarea"
 [ShadowGuard] composer attached: <div id="prompt-textarea" …>
  [ShadowGuard] INTERCEPTING  keydown · click · submit — all send paths closed
 [ShadowGuard] bridge OK — reply from service worker: {type: "SG_PONG", …}
