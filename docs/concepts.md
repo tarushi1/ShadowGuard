@@ -273,9 +273,41 @@ Conflating them causes real bugs: ranking overlapping matches by severity first 
 `critical` guess beat a checksum-validated `high` match. See [D16](decisions.md#d16--overlap-resolution-ranks-confidence-before-severity).
 
 ### Shannon entropy
-A measure of randomness in bits per character. English prose sits around 3.5–4.0; a random API
-key approaches 5.0+ for base64 alphabets. Catches secrets whose *format* is unknown — the
-complement to regex, which only catches formats you anticipated.
+Information density in **bits per character**: `H = -Σ p(c) log₂ p(c)`. Intuitively, how surprised
+you are on average by the next character. `"aaaa"` is 0 — you always know what comes next.
+
+Catches secrets whose **format is unknown** — the complement to regex, which only catches formats
+you anticipated. Neither subsumes the other: regex has near-perfect precision and zero recall on
+unknown formats; entropy has broad recall and mediocre precision.
+
+**The naive version does not work**, for two measured reasons:
+
+1. **Entropy is capped by length.** A string of length *n* carries at most `log₂(n)` bits per
+   character. A 20-character token maxes out at 4.32 bits *however random it is*, so the commonly
+   quoted 4.5 threshold silently never fires on short tokens.
+2. **English is high-entropy at this scale.** Letters rarely repeat inside twenty characters.
+   Measured on our own samples:
+
+   | string | H |
+   |---|---|
+   | `thequickbrownfoxjump` (English) | **4.12** |
+   | `a3f5c9e17b2d48f6a0c3e5b7d9f1a2c4` (random hex) | **3.93** |
+
+   English scores *higher* than a random hex key. A raw threshold flags prose and misses the secret.
+
+**What actually discriminates: character-class diversity.** Random base64 uses all three of
+{lowercase, uppercase, digit}; hex uses two; English prose and `snake_case` identifiers use one.
+That single check removes the entire prose false-positive class.
+
+**Charset-aware thresholds.** Hex is capped at 4.0 bits by its 16-symbol alphabet, base64 reaches
+6.0. One threshold for both would either miss every hex secret or flood on base64. Ours:
+hex ≥ 3.5, general ≥ 4.2.
+
+**It stays a weak signal**, deliberately. Base64 images, minified JS, git SHAs and UUIDs are all
+high-entropy and harmless. Findings cap at `medium` severity and 0.85 confidence: random-looking
+is *suspicious*, not proven. This stage warns and never blocks alone — which is exactly why the
+Week 5 risk engine exists, to weigh signals rather than act on any one.
+→ `backend/app/detectors/entropy_detector.py`
 
 ### Precision, recall, false-positive rate
 The numbers the report is graded on:

@@ -106,6 +106,12 @@ Each entity:
 | `IBAN` | high | 0.80 | mod-97 checksum not yet implemented |
 | `EMAIL` | low | 0.95 | not a secret alone; matters in combination |
 
+**Stage 1b — entropy** adds one type:
+
+| Type | Severity | Confidence | Notes |
+|---|---|---|---|
+| `HIGH_ENTROPY_STRING` | medium | 0.50–0.85 | Random-looking token of unknown format. Capped at `medium` — it can warn, never block alone. UUIDs and git SHAs excluded. |
+
 Measured latency: **~0.04 ms** per message end to end.
 
 ### Three properties worth understanding
@@ -115,7 +121,7 @@ response never contains the secret — see [D10](decisions.md#d10--the-response-
 
 **`latency_ms` and `stages_run` ship from day one.** Latency is a graded metric and cannot be
 collected retrospectively. `stages_run` makes short-circuiting *visible evidence* rather than a
-claim: when Stage 1 finds a critical secret the pipeline skips Stage 2, and this field proves it.
+claim. A `critical` regex hit returns `["regex"]`; anything else returns `["regex", "entropy"]`.
 
 **`action` vs `level` are separate on purpose.** Severity is a property of what was *found*;
 action is a property of *policy*. An organisation might warn rather than block on `critical`, and

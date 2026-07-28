@@ -243,6 +243,49 @@ false positives are the adoption failure** — and a tool people disable has a r
 
 ---
 
+## D18 — Entropy thresholds derived from measurement, not convention
+**Date:** 2026-07-29 · **Status:** active
+
+The widely quoted recipe is "Shannon entropy > 4.5 over 20-character tokens". We measured it
+before adopting it, and it fails twice: entropy is capped at `log₂(n)` so a 20-char token can
+never reach 4.5, and English prose out-scores random hex at this length.
+
+**Chosen:** character-class diversity (≥ 2 of lowercase/uppercase/digit) as the primary
+discriminator, plus charset-aware thresholds — hex ≥ 3.5 (ceiling 4.0), general ≥ 4.2 (ceiling
+6.0). UUIDs and 40-char lowercase hex excluded outright.
+
+**Consequence:** the report can state a measured basis for every threshold rather than citing a
+convention that does not survive contact with data.
+
+---
+
+## D19 — Entropy findings cap at `medium` severity and 0.85 confidence
+**Date:** 2026-07-29 · **Status:** active
+
+Base64 images, minified JavaScript, git SHAs and UUIDs are all high-entropy and harmless.
+
+**Chosen:** this stage can warn, never block, on its own; confidence never reaches 1.0.
+
+**Reasoning:** the detector cannot know *what* it found, only that the characters look random.
+Claiming certainty would have the risk engine weight it like a private-key header match, which it
+is nothing like. Honest uncertainty is what makes weighted fusion possible in Week 5.
+
+---
+
+## D20 — Short-circuit after a critical finding
+**Date:** 2026-07-29 · **Status:** active
+
+**Chosen:** when Stage 1a returns a `critical` finding, skip later stages. The verdict cannot
+change, and Stage 2's spaCy inference alone is ~50ms against ~0.04ms for everything currently in
+the pipeline.
+
+**Consequence:** `stages_run` in the response records what actually executed, so the optimisation
+is **evidence** rather than a claim. Two tests assert both halves — that it fires on critical
+input, and that it does *not* fire otherwise (short-circuiting must be conditional, not an excuse
+for never running later stages).
+
+---
+
 ## Still open
 
 | Question | Decide by |

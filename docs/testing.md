@@ -93,6 +93,8 @@ Backend must be running for rows 1–5.
 | 14 | Switch conversation in the sidebar | `composer RE-attached`. Interception still works. |
 | 15 | Esc on a warning modal | Treated as Cancel |
 | 16 | Type `charge 4111 1111 1111 1112` (last digit changed) | **No modal** — fails the Luhn checksum, so it is not a card |
+| 17 | Type `internal auth token Zq7Wm2Kp9Xr4Nv6Bt8Lc3Hd5Fj1Gy0Ae` | 🟠 modal, score 50, `high entropy string` — matches no regex rule at all |
+| 18 | Type `see commit e83c5163316f89bfbde7d9ab23ca2e25604af290` | **No modal** — git SHAs are excluded |
 
 ### The rows that matter most
 
@@ -134,7 +136,13 @@ Request body → **Execute**.
 ```json
 {"text": "deploy key AKIAIOSFODNN7EXAMPLE", "user_id": "test", "platform": "chatgpt"}
 ```
-→ `block`, score 95, `AWS_ACCESS_KEY_ID`
+→ `block`, score 95, `AWS_ACCESS_KEY_ID`, and **`stages_run: ["regex"]`** — the short-circuit,
+visible. Every other input returns `["regex", "entropy"]`.
+
+```json
+{"text": "internal auth Zq7Wm2Kp9Xr4Nv6Bt8Lc3Hd5Fj1Gy0Ae", "user_id": "test", "platform": "chatgpt"}
+```
+→ `warn`, score 50, `HIGH_ENTROPY_STRING` — no regex rule matches this; only entropy finds it.
 
 ```json
 {"text": "hello", "platform": "chatgpt"}
@@ -152,7 +160,7 @@ curl -s -X POST http://127.0.0.1:8000/api/v1/analyze \
 ### Automated
 
 ```bash
-pytest -q                                    # expect: 73 passed
+pytest -q                                    # expect: 101 passed
 pytest backend/tests/test_regex_detector.py -v   # detector only
 pytest -v                                    # per-test names
 ```
