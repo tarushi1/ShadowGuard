@@ -29,7 +29,7 @@ It computes a risk score and decides whether to **allow**, **warn**, **redact**,
 
 | | |
 |---|---|
-| **Last updated** | 2026-07-28 |
+| **Last updated** | 2026-07-29 |
 | **Project root** | `/Users/arushitiwari/Desktop/ShadowGuard` |
 | **Git branch** | `main` (23 commits, working tree clean) |
 | **Current stage** | Stage 0 complete. Stage 1 in progress — extension and backend are connected end to end. |
@@ -44,7 +44,7 @@ Loading `extension/` unpacked into Chrome and opening `chatgpt.com` produces, in
 
 ```
  [ShadowGuard] ACTIVE            ← green badge
-[ShadowGuard] version    : 0.7.0
+[ShadowGuard] version    : 0.8.0
 [ShadowGuard] host       : chatgpt.com
 [ShadowGuard] frame      : top-level
 [ShadowGuard] adapter    : ChatGPT (chatgpt)
@@ -59,17 +59,24 @@ a red `SEND BLOCKED` group naming the trigger. Shift+Enter, IME composition, an 
 clicks outside the send button, and Enter outside the composer all pass through untouched.
 Switching conversations (SPA navigation, no page reload) logs `composer RE-attached`.
 
-**The full loop runs without touching the console.** A safe message replays silently and the user
-never knows ShadowGuard was there. A risky one raises the Shadow-DOM modal: **Cancel** blocks and
-leaves the text for editing, **Send anyway** replays it. At `block` severity there is no override
-button at all.
+**The full loop runs against the real backend.** The extension holds the message, the service
+worker `POST`s it to FastAPI on `127.0.0.1:8000`, and the returned verdict decides what happens.
+A safe message replays silently and the user never knows ShadowGuard was there. A risky one raises
+the Shadow-DOM modal: **Cancel** blocks and leaves the text for editing, **Send anyway** replays
+it. At `block` severity there is no override button at all.
 
-The verdict still comes from `placeholderVerdict()` — three substring checks in `content.js`,
-marked for deletion in Week 3. Detection logic stays out of the extension deliberately: the Python
-evaluation harness calls detectors directly, so anything written in JavaScript contributes nothing
-to the precision/recall numbers.
+**The extension now contains zero detection logic.** Every verdict comes from Python. The backend
+still runs a two-substring stub in `pipeline/orchestrator.py`, deleted in Task 3.4 when the real
+regex detector lands.
 
-Try it: `hello` sends straight through; `my password: hunter2` warns; `sk-proj-abc123def456` blocks.
+If the backend is unreachable, a **grey** "offline — not inspected" modal appears and sending is
+the focused default (fail open, visibly — see [D12](docs/decisions.md)).
+
+Try it: `hello` sends straight through; `the db password is hunter2` warns; `sk-proj-abc123def456`
+blocks. Then stop the server and send anything to see the offline path.
+
+Each request carries a `request_id` that appears in **both** the browser console and the uvicorn
+terminal — that correlation is what makes an incident traceable across systems.
 
 **Console handle for manual inspection** — switch the DevTools console context dropdown from `top`
 to **ShadowGuard AI** first, or these are undefined:
@@ -87,8 +94,10 @@ __sg.approve()       // stands in for the modal's "Proceed"
 __sg.discard()       // stands in for "Cancel"
 __sg.sendButton()    // where a replay would route right now
 __sg.modal           // the modal instance (its shadow root is closed — this is the only handle)
-__sg.demoModal(lvl)  // render the modal with sample data: low | medium | high | critical
 ```
+
+Full testing guide, including the console-context trap and debugging by symptom:
+**[docs/testing.md](docs/testing.md)**.
 
 `console.debug` lines (the "why did this Enter pass through" messages) are hidden unless the
 console filter is set to **Verbose**.
@@ -513,6 +522,11 @@ To be expanded for the report; recording as they come up:
 ## Git history
 
 ```
+393e9ae  docs: add knowledge base under docs/
+c45de5f  feat: connect the extension to the FastAPI backend
+61469ec  feat(backend): POST /api/v1/analyze with typed contract and tests
+3d3c7e1  feat(backend): FastAPI app skeleton with health endpoint
+f2c7445  docs: close out Week 2 in README; defer 2.6 to Week 6
 cfeb89a  feat(extension): wire the modal to the send decision
 f0a6099  feat(extension): warning modal in a closed Shadow DOM
 ae553d3  fix(extension): name the three composer-attach cases distinctly
