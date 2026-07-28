@@ -165,6 +165,14 @@ globalThis.SG.WarningModal = class WarningModal {
       .level-high     { background: #c62828; }
       .level-critical { background: #6a1b9a; }
 
+      /* Deliberately grey rather than a risk colour. "We could not
+         check this" is a different statement from "this is dangerous",
+         and colouring it like a threat would teach users to ignore
+         real threats. */
+      .level-offline  { background: #455a64; }
+
+      .detail[hidden], .preview[hidden] { display: none; }
+
       .body { padding: 18px 20px 8px; }
       .message { margin: 0 0 14px; }
 
@@ -258,7 +266,7 @@ globalThis.SG.WarningModal = class WarningModal {
         <div class="body">
           <p class="message" id="sg-msg"></p>
 
-          <div class="detail">
+          <div class="detail" id="sg-detail">
             <div class="row">
               <span class="label">Risk score</span>
               <span class="value" id="sg-score"></span>
@@ -327,6 +335,11 @@ globalThis.SG.WarningModal = class WarningModal {
 
     this.dialog.showModal();
 
+    // showModal() honours the `autofocus` attribute, which is on
+    // Cancel. Override it explicitly when the variant wants a
+    // different default, after opening so the dialog is focusable.
+    this._defaultButton?.focus();
+
     return new Promise((resolve) => {
       this._resolve = resolve;
     });
@@ -335,6 +348,7 @@ globalThis.SG.WarningModal = class WarningModal {
   /** @private */
   #update(verdict) {
     const {
+      variant = "risk",
       level = "medium",
       score = 0,
       entities = [],
@@ -344,25 +358,32 @@ globalThis.SG.WarningModal = class WarningModal {
     } = verdict ?? {};
 
     const $ = (id) => this.dialog.querySelector(id);
+    const offline = variant === "offline";
 
-    const banner = $("#sg-banner");
-    banner.className = `banner level-${level}`;
-    $("#sg-title").textContent =
-      level === "critical" ? "Blocked — critical content" : "Sensitive content detected";
+    $("#sg-banner").className = `banner level-${offline ? "offline" : level}`;
+
+    $("#sg-title").textContent = offline
+      ? "ShadowGuard is offline"
+      : level === "critical"
+        ? "Blocked — critical content"
+        : "Sensitive content detected";
 
     // textContent, not innerHTML. See the note in #buildDialog().
     $("#sg-msg").textContent = message;
-    $("#sg-score").textContent = `${score} / 100 (${level})`;
 
-    const list = $("#sg-entities");
-    list.textContent = "";
-    if (entities.length === 0) {
-      const none = document.createElement("span");
-      none.className = "entity";
-      none.textContent = "none";
-      list.appendChild(none);
-    } else {
-      for (const name of entities) {
+    // There is no score and there are no entities when nothing ran.
+    // Showing "0 / 100 (low)" would be an outright lie — it reads as
+    // "we checked and it is fine", which is the opposite of the truth.
+    $("#sg-detail").hidden = offline;
+
+    if (!offline) {
+      $("#sg-score").textContent = `${score} / 100 (${level})`;
+
+      const list = $("#sg-entities");
+      list.textContent = "";
+
+      const names = entities.length > 0 ? entities : ["none"];
+      for (const name of names) {
         const chip = document.createElement("span");
         chip.className = "entity";
         chip.textContent = name;
@@ -376,7 +397,16 @@ globalThis.SG.WarningModal = class WarningModal {
 
     // At critical severity there is no override. That is a policy
     // decision surfaced in the UI: warn is advisory, block is not.
-    $("#sg-proceed").hidden = !allowProceed;
+    const proceed = $("#sg-proceed");
+    proceed.hidden = !allowProceed;
+    proceed.textContent = offline ? "Send without checking" : "Send anyway";
+
+    // Which button is focused IS the default action, because Enter
+    // activates it. For a risk warning the safe default is Cancel. In
+    // the offline case the chosen policy is fail-open, so the send
+    // button carries the default — the dialog's job there is to
+    // inform, not to obstruct.
+    this._defaultButton = offline && allowProceed ? proceed : $("#sg-cancel");
   }
 
   /** @private */

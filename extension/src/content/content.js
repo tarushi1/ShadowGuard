@@ -15,11 +15,11 @@
  *   - see the page's own JavaScript variables (isolated world)
  *   - call our backend directly (that is the service worker's job)
  *
- * At this stage (Task 2.5) the full Week 2 mechanism is in place:
- * every send path is cancelled, the message is held, a verdict decides
- * whether to replay it silently or show the modal, and the user's
- * choice resolves it. The verdict still comes from a deliberately
- * stupid local placeholder; Week 3 replaces that with the backend.
+ * At this stage (Task 3.3) the loop is closed end to end: every send
+ * path is cancelled, the message is held, the service worker asks the
+ * FastAPI backend for a verdict, and that verdict decides whether to
+ * replay silently or raise the modal. When the backend cannot be
+ * reached we fail OPEN but visibly — see SG.CONFIG.FAIL_MODE.
  */
 
 (() => {
@@ -161,30 +161,73 @@
 
     pending = { text, trigger: context.trigger, at: Date.now() };
 
-    // TEMPORARY — deleted in Week 3, when the service worker calls the
-    // backend and this becomes `await requestVerdict(text)`.
-    const verdict = placeholderVerdict(text);
+    // The content script cannot call the backend itself — it runs with
+    // chatgpt.com's origin, so the request would be cross-origin and
+    // blocked. The service worker runs with the extension's own origin
+    // and is granted the hosts in host_permissions. This round trip
+    // through the worker is Chrome's design, not a workaround.
+    const result = await chrome.runtime.sendMessage({
+      type: SG.MSG.ANALYZE_REQUEST,
+      payload: {
+        text,
+        platform: adapter.id,
+        trigger: context.trigger,
+        client_version: VERSION,
+      },
+    });
+
+    // ---- Backend unreachable: fail OPEN, but visibly ------------
+    // See SG.CONFIG.FAIL_MODE for the reasoning. The short version:
+    // being told a message was not inspected is meaningfully different
+    // from being silently unprotected, and a control that bricks
+    // ChatGPT whenever a laptop process is down gets uninstalled.
+    if (!result?.ok) {
+      console.warn(`${TAG} could not reach the backend — ${result?.error ?? "no response"}`);
+
+      const decision = await modal.show({
+        variant: "offline",
+        message:
+          "ShadowGuard could not reach its analysis service, so this message " +
+          "has NOT been checked for sensitive content. Send it only if you " +
+          "are confident it is safe.",
+        preview: previewOf(text),
+        allowProceed: SG.CONFIG.FAIL_MODE === "open",
+      });
+
+      if (decision === "proceed") approve();
+      else discard();
+      return;
+    }
+
+    const verdict = result.verdict;
 
     console.log(
       `${TAG} ${context.trigger} → ${verdict.action.toUpperCase()} ` +
-      `(score ${verdict.score}, ${verdict.entities.join(", ") || "no entities"})`
+      `(score ${verdict.score}, ${verdict.latency_ms}ms server / ` +
+      `${result.roundTripMs}ms round trip, id ${verdict.request_id})`
     );
 
     // ---- allow: the user never learns we were here --------------
-    // Once every send is intercepted, a safe message still has to get
-    // through, silently. In Week 3 this path carries the latency of a
-    // real HTTP round trip, which is why the backend has to be fast.
+    // Every send now carries a real HTTP round trip, which is why the
+    // backend's latency budget is a product requirement and not just a
+    // number in the report.
     if (verdict.action === SG.ACTION.ALLOW) {
       approve({ silent: true });
       return;
     }
 
+    // The backend returns entities as objects with offsets and never
+    // the matched text. The modal only needs the type names, deduped —
+    // three separate API keys should read as one "API_KEY" chip rather
+    // than three identical ones.
+    const entityTypes = [...new Set(verdict.entities.map((e) => e.type))];
+
     const decision = await modal.show({
       level: verdict.level,
       score: verdict.score,
-      entities: verdict.entities,
+      entities: entityTypes,
       message: verdict.message,
-      preview: verdict.preview,
+      preview: previewOf(text),
 
       // No override at block severity. warn is advisory; block is not.
       allowProceed: verdict.action !== SG.ACTION.BLOCK,
@@ -197,165 +240,10 @@
     }
   }
 
-  // ---------------------------------------------------------------
-  // TEMPORARY placeholder verdict — DELETE IN WEEK 3
-  // ---------------------------------------------------------------
-  /**
-   * Stand-in for the backend, so the four action paths can be
-   * exercised before any Python exists.
-   *
-   * This is deliberately stupid — three substring checks — and it is
-   * NOT the beginning of a detection engine. Detection logic must not
-   * live in the extension:
-   *
-   *   1. The architecture is "the browser detects and enforces, the
-   *      server decides". Splitting the decision across two languages
-   *      means two implementations to keep in sync.
-   *
-   *   2. More importantly for the evaluation: the Week 3 harness is
-   *      Python and calls the detectors directly. Anything implemented
-   *      in JavaScript is invisible to it, so it contributes nothing to
-   *      the precision/recall numbers. Logic the harness cannot call
-   *      does not exist as far as the report is concerned.
-   *
-   * @param {string} text
-   * @returns {{action: string, level: string, score: number,
-   *            entities: string[], message: string, preview: string}}
-   */
-  function placeholderVerdict(text) {
-    const preview = text.length > 160 ? `${text.slice(0, 160)}…` : text;
-
-    if (/\bsk-[A-Za-z0-9-]{8,}/.test(text) || text.includes("BEGIN PRIVATE KEY")) {
-      return {
-        action: SG.ACTION.BLOCK,
-        level: "critical",
-        score: 96,
-        entities: ["SECRET_KEY"],
-        message:
-          "A credential was detected in this message. Sending has been blocked.",
-        preview,
-      };
-    }
-
-    if (/\bAKIA[0-9A-Z]{6,}/.test(text) || /password\s*[:=]/i.test(text)) {
-      return {
-        action: SG.ACTION.WARN,
-        level: "high",
-        score: 74,
-        entities: ["CREDENTIAL"],
-        message:
-          "This message appears to contain credential-like content. " +
-          "Review it before sending.",
-        preview,
-      };
-    }
-
-    return {
-      action: SG.ACTION.ALLOW,
-      level: "low",
-      score: 4,
-      entities: [],
-      message: "No sensitive content detected.",
-      preview,
-    };
+  /** Trim the user's text to something that fits the modal. */
+  function previewOf(text) {
+    return text.length > 160 ? `${text.slice(0, 160)}…` : text;
   }
-
-  // ---------------------------------------------------------------
-  // Pending send + replay
-  // ---------------------------------------------------------------
-  /**
-   * Send the held message.
-   *
-   * Stands in for the modal's "Proceed" button until Task 2.5.
-   *
-   * @returns {boolean} whether a replay was attempted
-   */
-  function approve({ silent = false } = {}) {
-    if (!pending) {
-      console.warn(`${TAG} nothing pending to approve.`);
-      return false;
-    }
-
-    // The composer can disappear between interception and decision —
-    // the user navigates to another conversation while the modal is
-    // open, React unmounts the editor, and there is nothing left to
-    // replay into. Failing loudly beats silently dropping an approved
-    // message, which the user would read as "I clicked send and
-    // nothing happened".
-    if (!composer) {
-      console.error(`${TAG} composer went away before approval — nothing to replay into.`);
-      pending = null;
-      return false;
-    }
-
-    // The composer is editable while a decision is outstanding, so
-    // the user can change the text after it was analysed and before
-    // they approve. Sending the edited version would mean shipping
-    // text that never passed inspection. Warn now; Week 5 turns this
-    // into a re-analysis.
-    const current = adapter.readText(composer);
-    if (current !== pending.text) {
-      console.warn(
-        `${TAG} composer text changed since it was inspected ` +
-        `(${pending.text.length} → ${current.length} chars). ` +
-        `Re-analysis on edit is Week 5 work.`
-      );
-    }
-
-    const result = adapter.send(composer);
-    const held = pending;
-    pending = null;
-
-    // An allowed send is the common case and must not spam the console
-    // on every message — but it still gets one quiet line, because a
-    // silent security control is an unauditable one.
-    if (silent) {
-      console.debug(`${TAG} allowed and sent via ${result.method}.`);
-    } else {
-      console.log(
-        `%c ${TAG} SEND REPLAYED `,
-        "background:#0a7d47; color:#fff; padding:2px 6px; border-radius:3px;",
-        `via ${result.method} (${result.detail})`
-      );
-    }
-
-    // ---- Verify the effect, do not assume the action worked ----
-    // A send that silently no-ops is the worst outcome: the user
-    // believes their approved message went, and it did not.
-    //
-    // Deliberately a warning and NOT an auto-retry. Retrying a failed
-    // action is good practice in most apps; in a DLP tool it means
-    // the message you were already unsure about gets sent twice. A
-    // loud warning beats a silent double-send.
-    setTimeout(() => {
-      if (composer && !adapter.isEmpty(composer)) {
-        console.warn(
-          `${TAG} composer still has text ${VERIFY_DELAY_MS}ms after replay — ` +
-          `the send may not have gone through. Not retrying automatically.`
-        );
-      }
-    }, VERIFY_DELAY_MS);
-
-    return held !== null;
-  }
-
-  /** Drop the held message. The text stays in the box so it can be edited. */
-  function discard() {
-    if (!pending) {
-      console.warn(`${TAG} nothing pending to discard.`);
-      return false;
-    }
-    pending = null;
-    console.log(`${TAG} pending send discarded — text left in the composer for editing.`);
-    return true;
-  }
-
-  console.log(
-    `%c ${TAG} INTERCEPTING `,
-    "background:#8a4b00; color:#fff; padding:2px 6px; border-radius:3px;",
-    "keydown · click · submit — all send paths closed"
-  );
-  console.log(`${TAG} run __sg.disable() to use ChatGPT normally while developing.`);
 
   // ---------------------------------------------------------------
   // Manual debugging handle

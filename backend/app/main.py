@@ -37,6 +37,7 @@ Run it with:
 import logging
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from .api.routes import analyze as analyze_routes
 
@@ -87,6 +88,42 @@ async def health() -> dict:
     a "backend unavailable" state rather than silently failing open.
     """
     return {"status": "ok", "service": "shadowguard-ai", "version": API_VERSION}
+
+
+# ---------------------------------------------------------------
+# CORS
+# ---------------------------------------------------------------
+# Worth being precise about, because it is easy to cargo-cult.
+#
+# The extension's SERVICE WORKER does not actually need this. It runs
+# with the extension's own origin and Chrome grants it access to
+# whatever the manifest lists in host_permissions, so its requests are
+# not subject to the usual cross-origin refusal. That is precisely why
+# the architecture puts every network call in the worker.
+#
+# This middleware is here for the other two callers:
+#   - the admin dashboard (Week 7), which IS an ordinary web page and
+#     will be refused without it
+#   - a content script, if a future change ever tries to call directly
+#     — better a working request than an hour spent on an opaque
+#     browser error
+#
+# allow_origin_regex rather than a literal list because an unpacked
+# extension's id changes if it is loaded from a different path, and
+# hardcoding one id produces a failure that looks like a network
+# problem. Acceptable for a local prototype; a deployed build would
+# pin the exact published id, and that belongs in the report's
+# limitations.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origin_regex=r"^(chrome-extension://.*|http://(127\.0\.0\.1|localhost)(:\d+)?)$",
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
+    # No cookies or auth headers cross this boundary, so credentials
+    # stay off. Enabling them would also forbid the wildcard-ish origin
+    # matching above.
+    allow_credentials=False,
+)
 
 
 # Mounted last so the app object is fully configured first. The router

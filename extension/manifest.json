@@ -2,12 +2,21 @@
   "manifest_version": 3,
 
   "name": "ShadowGuard AI",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Context-aware multimodal data loss prevention for enterprise interactions with generative AI platforms.",
 
   "action": {
     "default_title": "ShadowGuard AI"
   },
+
+  "permissions": [
+    "storage"
+  ],
+
+  "host_permissions": [
+    "http://127.0.0.1:8000/*",
+    "http://localhost:8000/*"
+  ],
 
   "background": {
     "service_worker": "src/background/service_worker.js"
@@ -21,6 +30,7 @@
       ],
       "js": [
         "src/shared/messages.js",
+        "src/shared/config.js",
         "src/adapters/registry.js",
         "src/adapters/chatgpt.js",
         "src/content/composer_watcher.js",

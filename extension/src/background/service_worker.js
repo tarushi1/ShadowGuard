@@ -20,9 +20,118 @@
 // Classic (non-module) service workers load dependencies this way.
 // The leading slash resolves from the extension root, so this path
 // stays correct regardless of where this file sits.
-importScripts("/src/shared/messages.js");
+importScripts("/src/shared/messages.js", "/src/shared/config.js");
 
 const TAG = "[ShadowGuard:SW]";
+
+// ---------------------------------------------------------------
+// Identity
+// ---------------------------------------------------------------
+/**
+ * Get this installation's user id, creating one on first use.
+ *
+ * chrome.storage rather than a module-level variable, and this is the
+ * concrete payoff of the MV3 lifecycle lesson: Chrome terminates this
+ * worker after ~30 seconds idle and every global is lost. A generated
+ * id held in a `let` would silently become a NEW id on every wake-up,
+ * so Stage 4's behavioural baseline would see a stream of first-time
+ * users and never build a profile for anyone.
+ *
+ * Honest limitation for the report: this identifies an installation,
+ * not a person, and the extension asserts it to the backend with
+ * nothing to back it up. A real deployment would take identity from
+ * an authenticated session. Fine for a prototype, but it means the
+ * behavioural stage measures a browser profile rather than a human.
+ */
+async function getUserId() {
+  const stored = await chrome.storage.local.get("userId");
+  if (stored.userId) return stored.userId;
+
+  const fresh = crypto.randomUUID();
+  await chrome.storage.local.set({ userId: fresh });
+  console.log(`${TAG} generated new user id: ${fresh}`);
+  return fresh;
+}
+
+// ---------------------------------------------------------------
+// Backend call
+// ---------------------------------------------------------------
+/**
+ * Ask the backend to rule on a message.
+ *
+ * This function is the reason the service worker exists. A content
+ * script cannot make this call: it runs with the PAGE's origin, so
+ * the request would be a cross-origin one from chatgpt.com to
+ * localhost and the browser would block it under CORS. The service
+ * worker runs with the extension's own origin, and Chrome permits it
+ * to reach anything listed in the manifest's host_permissions.
+ *
+ * That is not a workaround — it is Chrome deliberately funnelling all
+ * extension network access through one auditable choke point.
+ *
+ * Never throws. Every failure mode returns { ok: false, error }, so
+ * the caller has exactly one shape to handle and a network blip
+ * cannot leave a message stuck in limbo.
+ *
+ * @param {object} payload  the AnalyzeRequest body
+ * @returns {Promise<{ok: true, verdict: object} | {ok: false, error: string}>}
+ */
+async function requestAnalysis(payload) {
+  const url = `${SG.CONFIG.BACKEND_URL}${SG.CONFIG.ANALYZE_PATH}`;
+
+  // fetch() has NO default timeout — a hung server means waiting
+  // forever, which for us means a send that never resolves and a
+  // composer the user can never clear. AbortController is the only
+  // way to bound it.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SG.CONFIG.REQUEST_TIMEOUT_MS);
+
+  const startedAt = performance.now();
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+
+    // fetch() only rejects on NETWORK failure. A 500, a 422, a 404 all
+    // resolve successfully with ok === false. Forgetting this check is
+    // how an error page ends up being parsed as a verdict.
+    if (!response.ok) {
+      return { ok: false, error: `backend returned HTTP ${response.status}` };
+    }
+
+    const verdict = await response.json();
+    const roundTripMs = Math.round(performance.now() - startedAt);
+
+    // Round trip vs. the server's own latency_ms: the difference is
+    // transport and serialisation overhead. Worth having both, because
+    // the report needs to talk about what the USER waited for, not
+    // just what the pipeline spent.
+    console.log(
+      `${TAG} verdict ${verdict.action} score=${verdict.score} ` +
+      `server=${verdict.latency_ms}ms roundtrip=${roundTripMs}ms id=${verdict.request_id}`
+    );
+
+    return { ok: true, verdict, roundTripMs };
+  } catch (error) {
+    const reason =
+      error.name === "AbortError"
+        ? `no response within ${SG.CONFIG.REQUEST_TIMEOUT_MS}ms`
+        : error.message;
+
+    console.warn(`${TAG} analysis failed — ${reason}`);
+    return { ok: false, error: reason };
+  } finally {
+    // Always clear the timer. Leaving it pending on the success path
+    // would abort a controller nobody is listening to — harmless here,
+    // but it leaks a timer per request and this worker handles every
+    // message from every tab.
+    clearTimeout(timer);
+  }
+}
 
 console.log(`${TAG} service worker script evaluated at ${new Date().toISOString()}`);
 
@@ -63,6 +172,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         echo: message.payload ?? null,
         workerVersion: chrome.runtime.getManifest().version,
       });
+      break;
+    }
+
+    case SG.MSG.ANALYZE_REQUEST: {
+      // The content script deliberately does NOT send a user_id: it
+      // has no access to chrome.storage, and identity is a property of
+      // the installation rather than of one tab. Stamping it here keeps
+      // it consistent across every tab and every conversation.
+      (async () => {
+        const userId = await getUserId();
+        const result = await requestAnalysis({ ...message.payload, user_id: userId });
+        sendResponse(result);
+      })();
+
+      // The async IIFE above returns immediately, so sendResponse has
+      // NOT been called yet when this switch finishes. `return true`
+      // at the bottom of the listener is what keeps the channel open
+      // for it. Without that, this is where you meet "The message port
+      // closed before a response was received."
       break;
     }
 
