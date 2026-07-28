@@ -7,7 +7,7 @@
 # failure that has nothing to do with your code.
 
 [tool.pytest.ini_options]
-testpaths = ["backend/tests"]
+testpaths = ["backend/tests", "evaluation/tests"]
 
 # Show a one-line summary of anything that is not a plain pass, so
 # skipped or xfailed tests cannot hide in a green run.
