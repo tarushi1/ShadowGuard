@@ -49,7 +49,8 @@ globalThis.SG.adapters = globalThis.SG.adapters || [];
  */
 globalThis.SG.registerAdapter = function registerAdapter(adapter) {
   const required = [
-    "id", "label", "hosts", "selectors", "readText", "isEmpty", "matchSendButton",
+    "id", "label", "hosts", "selectors",
+    "readText", "isEmpty", "matchSendButton", "findSendButton", "send",
   ];
   const missing = required.filter((key) => adapter?.[key] === undefined);
 

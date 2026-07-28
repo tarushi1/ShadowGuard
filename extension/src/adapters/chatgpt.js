@@ -70,6 +70,112 @@
     },
 
     /**
+     * Locate the send button in the document, for programmatic use.
+     *
+     * Distinct from matchSendButton(), which answers "did this click
+     * come from the button?" and walks UP from an event target. This
+     * one walks the document DOWN to find it.
+     *
+     * Two exclusions matter:
+     *
+     *   - While a reply streams, ChatGPT replaces the send button
+     *     with a STOP button. Tier 1 and 2 stop matching (the testid
+     *     changes), but the structural tier 3 selector would happily
+     *     match it — and "clicking send" would abort the response.
+     *
+     *   - A disabled button cannot be clicked, so returning one would
+     *     make send() report success while doing nothing.
+     *
+     * @returns {{element: HTMLElement, selector: string, tier: number}|null}
+     */
+    findSendButton() {
+      const chain = this.selectors.sendButton;
+
+      for (let i = 0; i < chain.length; i++) {
+        const element = document.querySelector(chain[i]);
+        if (!element) continue;
+
+        if (element.disabled) continue;
+        if (element.offsetParent === null) continue;         // hidden
+        if (element.dataset?.testid === "stop-button") continue;
+
+        // Belt and braces for the structural tiers: the stop control
+        // is labelled, so check the accessible name too.
+        const label = (element.getAttribute("aria-label") ?? "").toLowerCase();
+        if (label.includes("stop")) continue;
+
+        return { element, selector: chain[i], tier: i + 1 };
+      }
+
+      return null;
+    },
+
+    /**
+     * Send whatever is currently in the composer.
+     *
+     * Note what this function does NOT do: it does not write the text
+     * back. We cancelled the send EVENT, never the text — the user's
+     * message is still in the box and React's internal state already
+     * holds it, because React saw every keystroke and we never
+     * interfered with those. Replay is therefore "trigger the send
+     * again", not "reconstruct the message".
+     *
+     * (Week 5's `redact` action is the one case where we do change
+     * the text before sending. That needs the native-value-setter
+     * workaround for React's controlled inputs, and is deliberately
+     * not built yet.)
+     *
+     * Both routes below dispatch events with isTrusted === false, so
+     * our own interceptor's synthetic-event guard lets them through.
+     * That is why replay needs no "am I replaying?" state flag.
+     *
+     * @param {HTMLElement} composer
+     * @returns {{method: string, detail: string}}
+     */
+    send(composer) {
+      // ---- Primary: click the platform's own button --------------
+      // Using the app's real send path means everything ChatGPT does
+      // on send — clearing the box, optimistic UI, scrolling,
+      // analytics — happens exactly as it normally would. React fires
+      // onClick for dispatched clicks; it never checks isTrusted.
+      const button = this.findSendButton();
+
+      if (button) {
+        button.element.click();
+        return { method: "button-click", detail: button.selector };
+      }
+
+      // ---- Fallback: synthetic Enter -----------------------------
+      // Reached when the button is missing, disabled, or the markup
+      // moved. Less reliable because it assumes their handler is on
+      // keydown, but better than having no way through at all.
+      composer.focus();
+
+      composer.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Enter",
+          code: "Enter",
+
+          // Deprecated, but plenty of production handlers still read
+          // them. Chrome honours these legacy members of
+          // KeyboardEventInit; omitting them leaves both at 0, and a
+          // handler checking `e.keyCode === 13` would ignore us.
+          keyCode: 13,
+          which: 13,
+
+          // Essential. React attaches its listeners at the app root,
+          // not on the composer — an event that does not bubble never
+          // reaches them.
+          bubbles: true,
+          cancelable: true,
+          composed: true,
+        })
+      );
+
+      return { method: "synthetic-enter", detail: "send button not found" };
+    },
+
+    /**
      * Was this click inside the send button?
      *
      * The event target is almost never the button itself. The arrow
