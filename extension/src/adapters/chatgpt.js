@@ -48,11 +48,12 @@
        * readText() below has to handle each.
        */
       composer: [
-        "#prompt-textarea",                          // tier 1 — stable id
-        'div.ProseMirror[contenteditable="true"]',   // tier 2 — editor implementation
-        'form [contenteditable="true"]',             // tier 3 — structural
-        "form textarea",                             // tier 4 — legacy textarea era
-        '[contenteditable="true"]',                  // tier 5 — last resort, page-wide
+        "#prompt-textarea",                          // 1 — stable id, either element type
+        'div.ProseMirror[contenteditable="true"]',   // 2 — rich editor implementation
+        'form [contenteditable="true"]',             // 3 — structural, rich editor
+        'textarea[name="prompt-textarea"]',          // 4 — named plain-textarea variant
+        "form textarea",                             // 5 — structural, plain
+        '[contenteditable="true"]',                  // 6 — last resort, page-wide
       ],
 
       /**

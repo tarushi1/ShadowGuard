@@ -48,7 +48,22 @@ globalThis.SG.ComposerWatcher = class ComposerWatcher {
 
     /** Which selector tier matched last time — used to report degradation. */
     this.lastTier = null;
+
+    /** Timestamp of the last upgrade sweep; see #check(). */
+    this.lastUpgradeCheck = 0;
   }
+
+  /**
+   * How often to re-run the full selector chain while attached to a
+   * degraded tier, looking for a better match that has since mounted.
+   *
+   * A compromise. Running the chain on every mutation would be
+   * wasteful — a streaming reply fires hundreds per second. Never
+   * running it means staying latched to a fallback element forever.
+   * One sweep per second is invisible to the user and negligible next
+   * to what the page itself is doing.
+   */
+  static UPGRADE_INTERVAL_MS = 1000;
 
   /**
    * Run the adapter's selector chain and return the first hit.
@@ -107,32 +122,73 @@ globalThis.SG.ComposerWatcher = class ComposerWatcher {
   }
 
   /**
-   * Re-discover if — and only if — our handle is missing or stale.
+   * Decide whether to (re-)attach. Runs on every DOM mutation.
    *
-   * `isConnected` is the precise question to ask: "is this node still
-   * attached to the document?" It is a single boolean maintained by
-   * the browser, far cheaper and more accurate than walking parents
-   * or comparing against a fresh querySelector on every mutation.
+   * Three distinct situations, and an earlier version of this file
+   * only handled the first two:
    *
-   * The early return matters for performance. This runs on EVERY DOM
-   * mutation on a busy chat page — including every token streamed
-   * into an assistant reply. In the common case it does one property
-   * read and exits.
+   *   1. No handle yet          → discover
+   *   2. Handle detached        → re-discover (SPA navigation)
+   *   3. Handle attached, but a BETTER match has since mounted
+   *                             → upgrade
+   *
+   * Case 3 is not hypothetical. ChatGPT renders a plain fallback
+   * <textarea> first and hydrates the rich editor a moment later. A
+   * watcher that only re-checks when its handle DIES stays latched to
+   * that fallback forever — and it looks fine, because the fallback
+   * is a real, visible, readable element. Silent attachment to the
+   * wrong node is precisely the failure this class exists to prevent.
+   *
+   * `isConnected` is the precise question for case 2: "is this node
+   * still in the document?" A single browser-maintained boolean, far
+   * cheaper than walking parents or re-querying every time.
+   *
+   * Performance shape:
+   *   - attached at tier 1  → one property read, return. The hot path,
+   *                           since nothing can beat tier 1.
+   *   - attached, degraded  → one property read plus, at most once a
+   *                           second, a full chain sweep.
+   *   - detached / missing  → full chain sweep.
    *
    * @private
    */
   #check() {
-    if (this.current?.isConnected) return;
+    const connected = this.current?.isConnected === true;
+
+    // Best possible match, still attached. Nothing to look for.
+    if (connected && this.lastTier === 1) return;
+
+    if (connected) {
+      // Degraded but working. Look for something better — throttled,
+      // because a streaming reply fires hundreds of mutations a second
+      // and each sweep is a handful of querySelector calls.
+      const now = Date.now();
+      if (now - this.lastUpgradeCheck < ComposerWatcher.UPGRADE_INTERVAL_MS) return;
+      this.lastUpgradeCheck = now;
+    }
 
     const found = this.find();
     if (!found) return;
 
-    const wasStale = this.current !== null;
+    if (connected) {
+      // Switch only for a STRICTLY better tier. Equal-or-worse means
+      // we already have the best available, and swapping to a
+      // different element at the same tier would churn listeners for
+      // no gain.
+      if (found.element === this.current || found.tier >= this.lastTier) return;
+
+      console.log(
+        `[ShadowGuard] composer UPGRADED tier ${this.lastTier} → ${found.tier} ` +
+        `via "${found.selector}" — the real editor mounted after the fallback.`
+      );
+    }
+
+    const reattached = this.current !== null;
     this.current = found.element;
 
     if (found.tier !== this.lastTier) {
-      // Tier changes are the early-warning signal for a ChatGPT
-      // redesign, so they are worth a louder log than a re-attach.
+      // Tier changes are the early-warning signal for a platform
+      // redesign, so they get a louder log than a plain re-attach.
       const severity = found.tier === 1 ? "log" : "warn";
       console[severity](
         `[ShadowGuard] composer matched at tier ${found.tier}/${this.adapter.selectors.composer.length} ` +
@@ -142,6 +198,6 @@ globalThis.SG.ComposerWatcher = class ComposerWatcher {
       this.lastTier = found.tier;
     }
 
-    this.onAttach(found.element, { ...found, reattached: wasStale });
+    this.onAttach(found.element, { ...found, reattached });
   }
 };

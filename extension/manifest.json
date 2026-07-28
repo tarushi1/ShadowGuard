@@ -2,7 +2,7 @@
   "manifest_version": 3,
 
   "name": "ShadowGuard AI",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Context-aware multimodal data loss prevention for enterprise interactions with generative AI platforms.",
 
   "action": {
