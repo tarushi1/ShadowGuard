@@ -34,7 +34,20 @@ Run it with:
                      is not something you would run in production)
 """
 
+import logging
+
 from fastapi import FastAPI
+
+from .api.routes import analyze as analyze_routes
+
+# One log line per request, with the decision but never the content.
+# Configured here rather than per-module so every logger in the app
+# inherits the same format and a request can be followed across files.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)-7s %(name)s | %(message)s",
+    datefmt="%H:%M:%S",
+)
 
 # Bumped by hand as the API's behaviour changes. Deliberately separate
 # from the extension's version: they are two independently deployable
@@ -74,3 +87,9 @@ async def health() -> dict:
     a "backend unavailable" state rather than silently failing open.
     """
     return {"status": "ok", "service": "shadowguard-ai", "version": API_VERSION}
+
+
+# Mounted last so the app object is fully configured first. The router
+# carries its own /api/v1 prefix, so the version segment lives in one
+# place and cannot drift between endpoints.
+app.include_router(analyze_routes.router)

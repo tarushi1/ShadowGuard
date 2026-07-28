@@ -1,0 +1,14 @@
+# Project-level tooling configuration.
+#
+# This file exists so that `pytest` with no arguments does the right
+# thing from the repository root. Without it, pytest guesses the root
+# and the import path, and `from backend.app.main import app` fails
+# depending on which directory you happened to run from — a confusing
+# failure that has nothing to do with your code.
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
+
+# Show a one-line summary of anything that is not a plain pass, so
+# skipped or xfailed tests cannot hide in a green run.
+addopts = "-ra"
