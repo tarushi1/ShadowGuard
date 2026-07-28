@@ -6,9 +6,22 @@ ShadowGuard sits between an employee and a browser-based generative-AI platform 
 and inspects everything — typed text, pasted text, uploaded images — *before* it is sent.
 It computes a risk score and decides whether to **allow**, **warn**, **redact**, or **block**.
 
-> **This README is the session-recovery document.** If a Claude session expires or context is lost,
-> read this file first: it records the current state, every locked decision, and the exact next task.
-> It is kept up to date as work progresses.
+> **This README is the session-recovery document.** If a session expires or context is lost, read
+> this file first: it records the current state, every locked decision, and the exact next task.
+>
+> **📚 For how and why things work, see the [knowledge base in `docs/`](docs/README.md).**
+> This file tracks *state*; `docs/` explains *the system*. Both are kept current as work proceeds.
+
+## Knowledge base
+
+| Document | What it covers |
+|---|---|
+| [docs/architecture.md](docs/architecture.md) | The system as a whole — components, data flow, why the boundaries sit where they do |
+| [docs/concepts.md](docs/concepts.md) | Every technical concept, explained from zero: browser internals, Python tooling, evaluation metrics |
+| [docs/decisions.md](docs/decisions.md) | The decision log — each choice, its alternatives, and the reasoning |
+| [docs/api.md](docs/api.md) | The HTTP contract between extension and backend |
+| [docs/security.md](docs/security.md) | Threat model, known bypasses, privacy, ethics, limitations |
+| [docs/testing.md](docs/testing.md) | How to verify every component and debug by symptom |
 
 ---
 
@@ -18,10 +31,10 @@ It computes a risk score and decides whether to **allow**, **warn**, **redact**,
 |---|---|
 | **Last updated** | 2026-07-28 |
 | **Project root** | `/Users/arushitiwari/Desktop/ShadowGuard` |
-| **Git branch** | `main` (20 commits, working tree clean) |
-| **Current stage** | Stage 0 complete (bar 2.6, deferred). Moving to Stage 1 — Python backend. |
-| **Completed** | Week 1 (1.1–1.5) and Week 2 (2.1–2.5) — all **verified on chatgpt.com**. 2.6 deferred to Week 6. |
-| **Next task** | **3.1 — install Python 3.12, create the venv, `pip install fastapi uvicorn`** |
+| **Git branch** | `main` (23 commits, working tree clean) |
+| **Current stage** | Stage 0 complete. Stage 1 in progress — extension and backend are connected end to end. |
+| **Completed** | Week 1 (1.1–1.5), Week 2 (2.1–2.5), Week 3 (3.1–3.3) — all **verified**. 2.6 deferred to Week 6. |
+| **Next task** | **3.4 — the real regex detector, replacing the stub** |
 | **Deadline** | ~2026-09-20 (8 weeks from 2026-07-26) |
 | **Weeks elapsed** | ~0.4 of 8 — ahead of plan |
 
@@ -388,10 +401,10 @@ Every task is independently testable — you know it works before moving on.
 
 | Task | Test | Status |
 |---|---|---|
-| 3.1 Python 3.12 + venv + `fastapi uvicorn` | `/docs` opens in the browser | ⬜ **next** |
-| 3.2 `POST /api/v1/analyze` returning a stub verdict | `curl` gets JSON back | ⬜ |
-| 3.3 Connect extension → backend end-to-end | Real modal driven by a real HTTP response ← **first true milestone** | ⬜ |
-| 3.4 Regex detector module (API keys, cards, emails, IBAN, JWT) | Unit tests pass on positive + negative cases | ⬜ |
+| 3.1 Python 3.12 + venv + `fastapi uvicorn` | `/docs` opens in the browser | ✅ |
+| 3.2 `POST /api/v1/analyze` returning a stub verdict | `curl` gets JSON back | ✅ |
+| 3.3 Connect extension → backend end-to-end | Real modal driven by a real HTTP response ← **first true milestone** | ✅ |
+| 3.4 Regex detector module (API keys, cards, emails, IBAN, JWT) | Unit tests pass on positive + negative cases | ⬜ **next** |
 | 3.5 Shannon entropy scorer | High on random keys, low on English prose | ⬜ |
 | 3.6 Labelled test corpus (~150 samples) | A CSV you can rerun forever | ⬜ |
 | 3.7 Evaluation harness (precision / recall / FPR) | A printed metrics table | ⬜ |
