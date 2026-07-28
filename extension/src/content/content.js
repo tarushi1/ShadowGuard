@@ -15,9 +15,9 @@
  *   - see the page's own JavaScript variables (isolated world)
  *   - call our backend directly (that is the service worker's job)
  *
- * At this stage (Task 2.1) it locates the composer and CANCELS the
- * Enter key before ChatGPT can send. Nothing is analysed and nothing
- * can be re-sent yet — that is Tasks 2.2 through 2.5.
+ * At this stage (Task 2.2) it locates the composer and cancels every
+ * send path — Enter, the send button, and form submission. Nothing is
+ * analysed and nothing can be re-sent yet; that is Tasks 2.3 to 2.5.
  */
 
 (() => {
@@ -121,10 +121,11 @@
   interceptor.start();
 
   console.log(
-    `%c ${TAG} INTERCEPTING ENTER `,
-    "background:#8a4b00; color:#fff; padding:2px 6px; border-radius:3px;"
+    `%c ${TAG} INTERCEPTING `,
+    "background:#8a4b00; color:#fff; padding:2px 6px; border-radius:3px;",
+    "keydown · click · submit — all send paths closed"
   );
-  console.log(`${TAG} run __sg.disable() to type in ChatGPT normally while developing.`);
+  console.log(`${TAG} run __sg.disable() to use ChatGPT normally while developing.`);
 
   // ---------------------------------------------------------------
   // Manual debugging handle

@@ -43,11 +43,14 @@ globalThis.SG.adapters = globalThis.SG.adapters || [];
  * @param {string}   adapter.label       human name for logs and the modal
  * @param {string[]} adapter.hosts       hostnames this adapter claims
  * @param {object}   adapter.selectors   tiered selector lists (see chatgpt.js)
- * @param {function} adapter.readText    (element) => string
- * @param {function} adapter.isEmpty     (element) => boolean
+ * @param {function} adapter.readText        (element) => string
+ * @param {function} adapter.isEmpty         (element) => boolean
+ * @param {function} adapter.matchSendButton (eventTarget) => {element,selector,tier}|null
  */
 globalThis.SG.registerAdapter = function registerAdapter(adapter) {
-  const required = ["id", "label", "hosts", "selectors", "readText", "isEmpty"];
+  const required = [
+    "id", "label", "hosts", "selectors", "readText", "isEmpty", "matchSendButton",
+  ];
   const missing = required.filter((key) => adapter?.[key] === undefined);
 
   if (missing.length > 0) {

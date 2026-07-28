@@ -56,14 +56,52 @@
       ],
 
       /**
-       * The submit control. Not used until Week 2 (Task 2.2), but
-       * declared now so the adapter interface is visible as a whole.
+       * The submit control — the arrow button beside the composer.
+       *
+       * ChatGPT swaps this button for a STOP button while a reply is
+       * streaming, which is why nothing in this codebase ever holds a
+       * reference to it. We re-identify it per click instead.
        */
       sendButton: [
         'button[data-testid="send-button"]',
         "#composer-submit-button",
         'form button[type="submit"]',
       ],
+    },
+
+    /**
+     * Was this click inside the send button?
+     *
+     * The event target is almost never the button itself. The arrow
+     * is a <button> wrapping an <svg> wrapping a <path>, and the
+     * browser reports the innermost element under the cursor — so
+     * `target.matches(buttonSelector)` is false essentially always,
+     * and fails silently forever.
+     *
+     * closest() walks UP from the target through its ancestors and
+     * returns the first match, which finds the button no matter how
+     * deep in its internals the user clicked.
+     *
+     * We walk the tiers individually rather than passing one
+     * comma-joined selector list so that the caller can report WHICH
+     * tier matched — the same early-warning signal the composer
+     * watcher provides.
+     *
+     * @param {EventTarget} target  usually event.target
+     * @returns {{element: HTMLElement, selector: string, tier: number}|null}
+     */
+    matchSendButton(target) {
+      // Text nodes and the document itself have no closest().
+      if (typeof target?.closest !== "function") return null;
+
+      const chain = this.selectors.sendButton;
+
+      for (let i = 0; i < chain.length; i++) {
+        const element = target.closest(chain[i]);
+        if (element) return { element, selector: chain[i], tier: i + 1 };
+      }
+
+      return null;
     },
 
     /**
