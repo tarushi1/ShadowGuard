@@ -81,6 +81,31 @@ def test_request_ids_are_unique_per_request():
     assert a != b
 
 
+def test_a_critical_regex_hit_short_circuits_later_stages():
+    """The optimisation the report claims, asserted rather than asserted-to.
+
+    A critical pattern match is already certain and already blocking,
+    so no later stage can change the verdict. Running them would buy
+    nothing and cost real latency — Stage 2's spaCy inference alone is
+    roughly 50ms against ~0.04ms for everything currently in the
+    pipeline.
+
+    `stages_run` is what makes this evidence instead of a claim.
+    """
+    body = client.post(ENDPOINT, json=payload("deploy key AKIAIOSFODNN7EXAMPLE")).json()
+
+    assert body["action"] == "block"
+    assert body["stages_run"] == ["regex"], "entropy should have been skipped"
+
+
+def test_non_critical_input_runs_every_stage():
+    """The other half of the same claim: short-circuiting must be
+    conditional, not an excuse for never running the later stages."""
+    body = client.post(ENDPOINT, json=payload("how do I sort a list")).json()
+
+    assert body["stages_run"] == ["regex", "entropy"]
+
+
 def test_latency_is_measured_and_plausible():
     """Latency is a graded metric, so it has to be real, not a placeholder."""
     body = client.post(ENDPOINT, json=payload("hello")).json()

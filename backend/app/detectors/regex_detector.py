@@ -46,7 +46,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from .base import Finding
+from .base import Finding, highest_severity, resolve_overlaps  # noqa: F401
 
 DETECTOR_NAME = "regex"
 
@@ -280,9 +280,6 @@ RULES: tuple[Rule, ...] = (
 # Scanning
 # ---------------------------------------------------------------
 
-_SEVERITY_ORDER = {"low": 0, "medium": 1, "high": 2, "critical": 3}
-
-
 def scan(text: str) -> list[Finding]:
     """Run every rule over `text` and return de-duplicated findings.
 
@@ -317,56 +314,4 @@ def scan(text: str) -> list[Finding]:
                 )
             )
 
-    return _resolve_overlaps(findings)
-
-
-def _resolve_overlaps(findings: list[Finding]) -> list[Finding]:
-    """Keep the strongest finding where several cover the same text.
-
-    Necessary because patterns genuinely overlap. A JWT is base64, so
-    other rules match fragments of it; an OpenAI project key also
-    satisfies the generic `sk-` shape. Without this, one secret is
-    reported three times, the modal shows three chips for one problem,
-    and any count-based scoring is inflated by nothing more than how
-    many rules happened to fire.
-
-    Ranking, in order: CONFIDENCE, then severity, then span length.
-
-    Confidence leads deliberately, and getting this wrong was a real
-    bug. Ranking by severity first lets a weak `critical` guess beat a
-    strong `high` one: the Aadhaar pattern matches any standalone
-    twelve digits at 0.7 confidence, so a Luhn-VALIDATED card number
-    at 0.9 was being reported as a national id purely because Aadhaar
-    is classed more severe. Severity says how bad a finding would be
-    if true; confidence says how likely it is to be true, and picking
-    between two candidate readings of the same characters is a
-    question about truth, not consequence.
-
-    Span length breaks remaining ties, because the longer match is the
-    more specific one — the full JWT rather than a fragment of it.
-    """
-    ranked = sorted(
-        findings,
-        key=lambda f: (
-            f.score,
-            _SEVERITY_ORDER.get(f.severity, 0),
-            f.end - f.start,
-        ),
-        reverse=True,
-    )
-
-    kept: list[Finding] = []
-    for finding in ranked:
-        if not any(finding.overlaps(existing) for existing in kept):
-            kept.append(finding)
-
-    # Return in document order: the modal and any highlighting read
-    # more naturally left to right than by score.
-    return sorted(kept, key=lambda f: f.start)
-
-
-def highest_severity(findings: list[Finding]) -> str | None:
-    """The worst severity present, or None when nothing was found."""
-    if not findings:
-        return None
-    return max(findings, key=lambda f: _SEVERITY_ORDER.get(f.severity, 0)).severity
+    return resolve_overlaps(findings)

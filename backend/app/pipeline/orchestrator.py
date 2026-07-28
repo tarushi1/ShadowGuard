@@ -22,8 +22,8 @@ neither does the extension.
 import time
 import uuid
 
-from ..detectors import regex_detector
-from ..detectors.base import Finding
+from ..detectors import entropy_detector, regex_detector
+from ..detectors.base import Finding, highest_severity, resolve_overlaps
 from ..schemas.analyze import (
     Action,
     AnalyzeRequest,
@@ -80,14 +80,32 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
 
     # ---- Stage 1a: pattern detection ----------------------------
     # Sub-millisecond and near-perfect on structured secrets, so it
-    # always runs first. Stages 2-4 arrive in later tasks; when they
-    # do, a critical finding here will short-circuit them, and
-    # `stages_run` is what makes that visible rather than claimed.
+    # always runs first.
     stages_run.append("regex")
     findings: list[Finding] = regex_detector.scan(request.text)
 
-    severity = regex_detector.highest_severity(findings)
-    action, level, score = _SEVERITY_VERDICT.get(severity, _NOTHING_FOUND)
+    # ---- Short-circuit ------------------------------------------
+    # A critical regex hit is already certain and already blocking.
+    # No later stage can change the verdict, so running them would buy
+    # nothing and cost real latency — Stage 2's spaCy inference alone
+    # is roughly 50ms, against ~0.04ms for everything so far.
+    #
+    # `stages_run` in the response records what actually executed,
+    # which turns this optimisation into evidence the report can point
+    # at rather than a claim it has to make.
+    critical_already = highest_severity(findings) == "critical"
+
+    if not critical_already:
+        # ---- Stage 1b: entropy ----------------------------------
+        # Catches secrets whose format nobody has published. Weak on
+        # its own — see the detector's docstring — so it is capped at
+        # `medium` severity and can warn but never block.
+        stages_run.append("entropy")
+        findings = resolve_overlaps(findings + entropy_detector.scan(request.text))
+
+    action, level, score = _SEVERITY_VERDICT.get(
+        highest_severity(findings), _NOTHING_FOUND
+    )
 
     # ---- Convert internal findings to the API shape -------------
     # This is where `value` is dropped. Findings carry the matched

@@ -87,3 +87,53 @@ class Finding:
         artefact of how many rules happened to fire.
         """
         return self.start < other.end and other.start < self.end
+
+
+SEVERITY_ORDER: dict[str, int] = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+
+
+def resolve_overlaps(findings: list[Finding]) -> list[Finding]:
+    """Keep the strongest finding where several cover the same text.
+
+    Shared by every detector AND applied again across detectors in the
+    pipeline, because overlap happens at both levels: two regex rules
+    can match the same span, and the entropy stage will independently
+    flag an API key the regex stage already identified precisely.
+
+    Ranking: CONFIDENCE, then severity, then span length.
+
+    Confidence leads deliberately, and getting this wrong was a real
+    bug. Ranking by severity first lets a weak `critical` guess beat a
+    strong `high` one: the Aadhaar pattern matches any standalone
+    twelve digits at 0.7 confidence, so a Luhn-VALIDATED card number at
+    0.9 was reported as a national id purely because Aadhaar is classed
+    more severe.
+
+    Severity says how bad a finding would be *if true*; confidence says
+    how likely it is *to be true*. Choosing between two readings of the
+    same characters is a question about truth, not consequence.
+
+    Span length breaks remaining ties, because the longer match is the
+    more specific one — the full JWT rather than a fragment of it.
+    """
+    ranked = sorted(
+        findings,
+        key=lambda f: (f.score, SEVERITY_ORDER.get(f.severity, 0), f.end - f.start),
+        reverse=True,
+    )
+
+    kept: list[Finding] = []
+    for finding in ranked:
+        if not any(finding.overlaps(existing) for existing in kept):
+            kept.append(finding)
+
+    # Document order: the modal and any highlighting read more
+    # naturally left to right than by score.
+    return sorted(kept, key=lambda f: f.start)
+
+
+def highest_severity(findings: list[Finding]) -> str | None:
+    """The worst severity present, or None when nothing was found."""
+    if not findings:
+        return None
+    return max(findings, key=lambda f: SEVERITY_ORDER.get(f.severity, 0)).severity
