@@ -18,10 +18,10 @@ It computes a risk score and decides whether to **allow**, **warn**, **redact**,
 |---|---|
 | **Last updated** | 2026-07-28 |
 | **Project root** | `/Users/arushitiwari/Desktop/ShadowGuard` |
-| **Git branch** | `main` (6 commits, working tree clean) |
-| **Current stage** | Stage 0 — Chrome extension scaffolding |
-| **Completed** | Tasks 1.1 – 1.4 |
-| **Next task** | **1.5 — locate ChatGPT's composer element reliably** |
+| **Git branch** | `main` (7 commits, working tree clean) |
+| **Current stage** | Stage 0 — Chrome extension. **Week 1 complete.** |
+| **Completed** | Tasks 1.1 – 1.5 (all of Week 1) |
+| **Next task** | **2.1 — capture-phase `keydown` listener that cancels Enter** |
 | **Deadline** | ~2026-09-20 (8 weeks from 2026-07-26) |
 | **Weeks elapsed** | ~0.3 of 8 |
 
@@ -31,16 +31,37 @@ Loading `extension/` unpacked into Chrome and opening `chatgpt.com` produces, in
 
 ```
  [ShadowGuard] ACTIVE            ← green badge
-[ShadowGuard] version    : 0.1.0
+[ShadowGuard] version    : 0.2.0
 [ShadowGuard] host       : chatgpt.com
-[ShadowGuard] readyState : complete
 [ShadowGuard] frame      : top-level
-[ShadowGuard] candidate input elements: 1
-[ShadowGuard] bridge OK — reply from service worker: {type: "SG_PONG", ...}
+[ShadowGuard] adapter    : ChatGPT (chatgpt)
+[ShadowGuard] composer matched at tier 1/5 via "#prompt-textarea"
+[ShadowGuard] composer attached: <div id="prompt-textarea" …>
+[ShadowGuard] bridge OK — reply from service worker: {type: "SG_PONG", …}
 ```
 
-Nothing is intercepted yet, and there is no backend yet. The extension proves only that our code
-runs inside the page and can talk to the service worker.
+Typing into the composer then logs, ~400ms after you stop:
+
+```
+[ShadowGuard] read 25 chars: "my api key is sk-test-123"
+```
+
+Switching conversations (SPA navigation, no page reload) logs
+`composer RE-attached (SPA navigation)` and reading keeps working.
+
+Nothing is intercepted yet, and there is no backend yet. The extension proves that our code runs
+inside the page, holds a live handle on the composer across navigation, can read what is typed,
+and can talk to the service worker.
+
+**Console handle for manual inspection** — switch the DevTools console context dropdown from `top`
+to **ShadowGuard AI** first, or these are undefined:
+
+```js
+__sg.read()          // current composer text
+__sg.isEmpty()       // ProseMirror-aware empty check
+__sg.composer        // the live element
+__sg.watcher.find()  // {element, selector, tier}
+```
 
 ---
 
@@ -181,9 +202,9 @@ ShadowGuard/
 │   │   │                       sandboxed from the page's JS, no cross-origin HTTP.
 │   │   ├── background/         the MV3 service worker. Event-driven, no DOM, dies after
 │   │   │                       ~30s idle. Owns ALL network calls to our API.
-│   │   ├── adapters/           one file per platform (chatgpt.js, gemini.js). Each knows
-│   │   │                       only "where is the composer / send button / how do I send".
-│   │   │                       This is why adding Gemini is cheap later.  [empty]
+│   │   ├── adapters/           one file per platform. Each knows only "where is the
+│   │   │                       composer / send button / how do I read and send". This is
+│   │   │                       why adding Gemini in Week 6 is one new file, not a rewrite.
 │   │   ├── ui/                 the warning modal, in a Shadow DOM so ChatGPT's CSS cannot
 │   │   │                       break our styling and vice versa.  [empty]
 │   │   └── shared/             message-type constants used by both worlds — prevents
@@ -228,10 +249,33 @@ the project becomes unmeasurable.
 
 | File | Lines | Purpose |
 |---|---|---|
-| `extension/manifest.json` | 30 | MV3 declaration: name, version, service worker registration, content-script injection rules for `chatgpt.com` and `chat.openai.com` |
-| `extension/src/shared/messages.js` | 41 | Frozen `SG.MSG` constants — the shared message vocabulary. Loaded by **both** worlds (manifest for content, `importScripts` for worker) |
-| `extension/src/content/content.js` | 103 | World 2. Re-injection guard, activation banner, DOM-access proof, and a PING across the bridge |
-| `extension/src/background/service_worker.js` | 89 | World 3. Lifecycle logging and the message router; replies PONG to PING |
+Content scripts load in the order listed in the manifest; each file depends on the ones above it.
+
+| File | Purpose |
+|---|---|
+| `extension/manifest.json` | MV3 declaration: version, service-worker registration, content-script injection rules for `chatgpt.com` and `chat.openai.com` |
+| `extension/src/shared/messages.js` | Frozen `SG.MSG` constants — the shared message vocabulary. Loaded by **both** worlds (manifest for content, `importScripts` for worker) |
+| `extension/src/adapters/registry.js` | `registerAdapter()` / `resolveAdapter()`. Exact-hostname matching, not substring — substring matching is how extensions end up running on `chatgpt.evil-site.com` |
+| `extension/src/adapters/chatgpt.js` | **The only file that knows how ChatGPT is built.** Tiered composer/send-button selectors, `<textarea>` vs contenteditable text extraction, ProseMirror empty-state handling |
+| `extension/src/content/composer_watcher.js` | `MutationObserver` that discovers the composer and re-discovers it when SPA navigation detaches it. Reports selector-tier degradation |
+| `extension/src/content/content.js` | World 2 orchestration only — no site knowledge, no discovery logic. Re-injection guard, adapter selection, debounced read instrumentation, `__sg` debug handle, PING across the bridge |
+| `extension/src/background/service_worker.js` | World 3. Lifecycle logging and the message router; replies PONG to PING |
+
+### Three design decisions worth being able to defend
+
+1. **`innerText`, not `textContent`.** ProseMirror renders one `<p>` per visual line.
+   `textContent` ignores layout, so `<p>sk-proj-abc</p><p>def123</p>` becomes
+   `"sk-proj-abcdef123"` — two lines fused into something that looks exactly like one API key.
+   `innerText` yields `"sk-proj-abc\ndef123"`. This is a **detection-accuracy** decision, not
+   formatting.
+2. **Tiered selectors with tier logging.** IDs and `data-testid` attributes are written by humans
+   for their own CI, so they rarely change; CSS class names are build-generated and get hashed on
+   any refactor. A drop from tier 1 to tier 3 prints a warning *before* anything breaks. Silent
+   degradation is the failure mode to avoid — a DLP tool that quietly stops detecting is worse
+   than none, because people still trust it.
+3. **`element.isConnected` guard.** The watcher callback runs on *every* DOM mutation, including
+   every token streamed into an assistant reply. The guard makes the common case one property
+   read. `offsetParent !== null` additionally filters hidden scaffolding ChatGPT leaves in the DOM.
 
 ### Permissions currently requested: **none**
 
@@ -263,13 +307,13 @@ Every task is independently testable — you know it works before moving on.
 | 1.2 `manifest.json`, load unpacked | Extension appears in `chrome://extensions` with no errors | ✅ |
 | 1.3 Content script logs "ShadowGuard active" | Visible in the ChatGPT page's DevTools console | ✅ |
 | 1.4 Service worker receives a message | Two consoles, both logging — proves the bridge | ✅ |
-| 1.5 Locate ChatGPT's composer element reliably | You can read the typed text from the console | ⬜ **next** |
+| 1.5 Locate ChatGPT's composer element reliably | You can read the typed text from the console | ✅ |
 
 ### Week 2 — Stage 0b: the interception itself (hardest week)
 
 | Task | Test | Status |
 |---|---|---|
-| 2.1 Capture-phase `keydown` listener cancels Enter | Press Enter, nothing sends, console logs the text | ⬜ |
+| 2.1 Capture-phase `keydown` listener cancels Enter | Press Enter, nothing sends, console logs the text | ⬜ **next** |
 | 2.2 Intercept the send-button click path | Clicking the arrow is also blocked | ⬜ |
 | 2.3 Replay the send programmatically after approval | Message sends after a fake "approve" | ⬜ |
 | 2.4 Inject the modal UI (Shadow DOM) | Modal renders correctly over the page | ⬜ |
@@ -384,6 +428,8 @@ To be expanded for the report; recording as they come up:
 ## Git history
 
 ```
+d895312  feat(extension): locate ChatGPT composer via adapter + MutationObserver
+552ae37  docs: sync README git-history section
 1941d40  chore: ignore .claude/ local tool-permission state
 dc124df  docs: add README as living session-recovery document
 06d0ca3  feat(extension): add service worker and content<->worker message bridge
