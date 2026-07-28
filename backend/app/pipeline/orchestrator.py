@@ -21,6 +21,7 @@ neither does the extension.
 
 import time
 import uuid
+from dataclasses import dataclass
 
 from ..detectors import entropy_detector, regex_detector
 from ..detectors.base import Finding, highest_severity, resolve_overlaps
@@ -55,6 +56,72 @@ _SEVERITY_VERDICT: dict[str, tuple[Action, RiskLevel, int]] = {
 _NOTHING_FOUND = (Action.ALLOW, RiskLevel.LOW, 0)
 
 
+@dataclass(frozen=True)
+class StageResult:
+    """What the detection stages concluded, before HTTP gets involved."""
+
+    action: Action
+    level: RiskLevel
+    score: int
+    findings: list[Finding]
+    stages_run: list[str]
+
+
+def run_stages(text: str, *, use_entropy: bool = True) -> StageResult:
+    """Run the detection stages and fuse them into a verdict.
+
+    Extracted from `analyze()` so the API route and the evaluation
+    harness call THE SAME CODE. That is the point: a harness that
+    reimplements the stage logic measures something that never runs in
+    production, and the two drift apart without either failing.
+
+    `use_entropy` exists for the harness, which needs a regex-only
+    baseline to compare against. The report's central claim is a
+    DIFFERENCE between configurations, so producing those
+    configurations has to be a first-class capability rather than a
+    commented-out line someone toggles by hand.
+
+    :param text: content to inspect
+    :param use_entropy: run Stage 1b as well as 1a
+    """
+    stages_run: list[str] = ["regex"]
+
+    # ---- Stage 1a: pattern detection ----------------------------
+    # Sub-millisecond and near-perfect on structured secrets, so it
+    # always runs first.
+    findings: list[Finding] = regex_detector.scan(text)
+
+    # ---- Short-circuit ------------------------------------------
+    # A critical regex hit is already certain and already blocking.
+    # No later stage can change the verdict, so running them would buy
+    # nothing and cost real latency — Stage 2's spaCy inference alone
+    # is roughly 50ms, against ~0.04ms for everything so far.
+    #
+    # `stages_run` records what actually executed, which turns this
+    # optimisation into evidence rather than a claim.
+    critical_already = highest_severity(findings) == "critical"
+
+    if use_entropy and not critical_already:
+        # ---- Stage 1b: entropy ----------------------------------
+        # Catches secrets whose format nobody has published. Weak on
+        # its own — see the detector's docstring — so it is capped at
+        # `medium` severity and can warn but never block.
+        stages_run.append("entropy")
+        findings = resolve_overlaps(findings + entropy_detector.scan(text))
+
+    action, level, score = _SEVERITY_VERDICT.get(
+        highest_severity(findings), _NOTHING_FOUND
+    )
+
+    return StageResult(
+        action=action,
+        level=level,
+        score=score,
+        findings=findings,
+        stages_run=stages_run,
+    )
+
+
 def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
     """Run the detection pipeline over one submission.
 
@@ -76,36 +143,9 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
     # what turns three separate systems into one traceable story.
     request_id = uuid.uuid4().hex[:12]
 
-    stages_run: list[str] = []
-
-    # ---- Stage 1a: pattern detection ----------------------------
-    # Sub-millisecond and near-perfect on structured secrets, so it
-    # always runs first.
-    stages_run.append("regex")
-    findings: list[Finding] = regex_detector.scan(request.text)
-
-    # ---- Short-circuit ------------------------------------------
-    # A critical regex hit is already certain and already blocking.
-    # No later stage can change the verdict, so running them would buy
-    # nothing and cost real latency — Stage 2's spaCy inference alone
-    # is roughly 50ms, against ~0.04ms for everything so far.
-    #
-    # `stages_run` in the response records what actually executed,
-    # which turns this optimisation into evidence the report can point
-    # at rather than a claim it has to make.
-    critical_already = highest_severity(findings) == "critical"
-
-    if not critical_already:
-        # ---- Stage 1b: entropy ----------------------------------
-        # Catches secrets whose format nobody has published. Weak on
-        # its own — see the detector's docstring — so it is capped at
-        # `medium` severity and can warn but never block.
-        stages_run.append("entropy")
-        findings = resolve_overlaps(findings + entropy_detector.scan(request.text))
-
-    action, level, score = _SEVERITY_VERDICT.get(
-        highest_severity(findings), _NOTHING_FOUND
-    )
+    result = run_stages(request.text)
+    action, level, score = result.action, result.level, result.score
+    findings, stages_run = result.findings, result.stages_run
 
     # ---- Convert internal findings to the API shape -------------
     # This is where `value` is dropped. Findings carry the matched
