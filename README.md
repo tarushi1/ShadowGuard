@@ -32,12 +32,12 @@ It computes a risk score and decides whether to **allow**, **warn**, **redact**,
 |---|---|
 | **Last updated** | 2026-07-29 |
 | **Project root** | `/Users/arushitiwari/Desktop/ShadowGuard` |
-| **Git branch** | `main` (32 commits, working tree clean) |
-| **Current stage** | Stage 0 complete. Stage 1 in progress — extension and backend are connected end to end. |
-| **Completed** | Week 1 (1.1–1.5), Week 2 (2.1–2.5), Week 3 (3.1–3.6) — all **verified**. 2.6 deferred to Week 6. |
-| **Next task** | **3.7 — the evaluation harness (precision / recall / FPR)** |
+| **Git branch** | `main` (36 commits, working tree clean) |
+| **Current stage** | Stages 0 and 1 complete and measured. Starting Stage 2. |
+| **Completed** | **Weeks 1–3 complete** (1.1–1.5, 2.1–2.5, 3.1–3.7). 2.6 deferred to Week 6. |
+| **Next task** | **Week 4 — Stage 2 semantic analysis (Presidio + spaCy)** |
 | **Deadline** | ~2026-09-20 (8 weeks from 2026-07-26) |
-| **Weeks elapsed** | ~0.4 of 8 — ahead of plan |
+| **Weeks elapsed** | ~0.5 of 8 — **well ahead of plan** (3 of 8 weeks' work done) |
 
 ### What actually runs today
 
@@ -111,6 +111,41 @@ Full testing guide, including the console-context trap and debugging by symptom:
 
 `console.debug` lines (the "why did this Enter pass through" messages) are hidden unless the
 console filter is set to **Verbose**.
+
+### Measured results — Stage 1, 150-sample corpus
+
+```
+                    regex only    + entropy     change
+  recall               74.7%        100.0%      +25.3%  ✓
+  false-positive        2.7%          2.7%           =
+  precision            96.6%         97.4%       +0.9%  ✓
+  F1                   84.2%         98.7%      +14.5%  ✓
+
+  precision @ 1% real-world prevalence            27.5%
+  latency   mean 0.014 ms   p50 0.013 ms   p95 0.022 ms
+```
+
+**Entropy buys 25 points of recall at no false-positive cost.** Reproduce with:
+
+```bash
+python -m evaluation.run_eval --failures
+```
+
+Two false positives remain, both deliberate:
+
+| | |
+|---|---|
+| `employee badge numbers run from 100000000000 to 999999999999` | flagged as Aadhaar |
+| `our sku format is ABCDE1234F which collides with the validator` | flagged as PAN |
+
+Both require understanding that a number is being **discussed** rather than **used**. No pattern
+or entropy measure can make that distinction — it is exactly what Stage 2 is for, and they are the
+concrete target for Week 4.
+
+> **On the 27.5%:** precision measured on a balanced corpus overstates real precision, because real
+> traffic is perhaps 1% sensitive. Both figures are reported. See
+> [evaluation/README.md](evaluation/README.md) — this is the base-rate fallacy, and it is the most
+> common way security-tool evaluations mislead.
 
 ---
 
@@ -426,7 +461,7 @@ Every task is independently testable — you know it works before moving on.
 | 3.4 Regex detector module (API keys, cards, emails, IBAN, JWT) | Unit tests pass on positive + negative cases | ✅ 73 tests |
 | 3.5 Shannon entropy scorer | High on random keys, low on English prose | ✅ 101 tests |
 | 3.6 Labelled test corpus (~150 samples) | A rerunnable labelled dataset | ✅ 150 samples, JSONL |
-| 3.7 Evaluation harness (precision / recall / FPR) | A printed metrics table | ⬜ **next** |
+| 3.7 Evaluation harness (precision / recall / FPR) | A printed metrics table | ✅ see results below |
 
 ### Week 4 — Stage 2: semantic analysis
 Presidio setup · spaCy model · custom recognizers · context words · confidence scores · merging

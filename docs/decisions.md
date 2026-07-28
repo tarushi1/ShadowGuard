@@ -323,6 +323,45 @@ strictly and fails on the first bad row rather than skipping it.
 
 ---
 
+## D24 — The harness calls the same code the API calls
+**Date:** 2026-07-29 · **Status:** locked
+
+`run_stages()` was extracted from `analyze()` so the route and the evaluation harness invoke one
+implementation, with `use_entropy` as a first-class parameter.
+
+**Reasoning:** a harness that reimplements the stage logic measures code that never runs in
+production, and the two drift apart with nothing failing to say so. The report's central claim is
+a *difference between configurations*, so producing those configurations must be a supported
+capability rather than a line someone comments out by hand.
+
+---
+
+## D25 — Fixing detector bugs from corpus failures, without overfitting
+**Date:** 2026-07-29 · **Status:** locked
+
+The harness immediately exposed 7 false positives. Five were fixed, two were left.
+
+**The line drawn:**
+
+| Principled — generalises | Overfitting — memorises |
+|---|---|
+| "hash-algorithm prefixes denote content digests, which are public by construction" | "exclude the literal string `51H8xKl…`" |
+| "vendor test keys are documented as safe to expose" | "exclude sample H010" |
+
+The five fixes are class-level rules. One was not tuning at all but a genuine **inconsistency in
+our own design**: the regex stage deliberately ignores `sk_test_`, and the entropy stage then
+flagged the same string.
+
+A test asserts the exclusions *narrow* the detector rather than neuter it — the same random body
+without a `sha512-` prefix is still caught. Without that, an exclusion list quietly grows until
+nothing is detected.
+
+**The two left:** `employee badge numbers run from 100000000000 to 999999999999` and `our sku
+format is ABCDE1234F`. Both require knowing a number is being *discussed* rather than *used*. No
+pattern can express that, so faking a fix would be corpus memorisation. They are Week 4's target.
+
+---
+
 ## Still open
 
 | Question | Decide by |
