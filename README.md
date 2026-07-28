@@ -18,10 +18,10 @@ It computes a risk score and decides whether to **allow**, **warn**, **redact**,
 |---|---|
 | **Last updated** | 2026-07-28 |
 | **Project root** | `/Users/arushitiwari/Desktop/ShadowGuard` |
-| **Git branch** | `main` (7 commits, working tree clean) |
-| **Current stage** | Stage 0 — Chrome extension. **Week 1 complete.** |
-| **Completed** | Tasks 1.1 – 1.5 (all of Week 1) |
-| **Next task** | **2.1 — capture-phase `keydown` listener that cancels Enter** |
+| **Git branch** | `main` (9 commits, working tree clean) |
+| **Current stage** | Stage 0 — Chrome extension. Week 1 complete; Week 2 in progress. |
+| **Completed** | Tasks 1.1 – 1.5 (all of Week 1), 2.1 |
+| **Next task** | **2.2 — intercept the send-button click path** |
 | **Deadline** | ~2026-09-20 (8 weeks from 2026-07-26) |
 | **Weeks elapsed** | ~0.3 of 8 |
 
@@ -37,21 +37,16 @@ Loading `extension/` unpacked into Chrome and opening `chatgpt.com` produces, in
 [ShadowGuard] adapter    : ChatGPT (chatgpt)
 [ShadowGuard] composer matched at tier 1/5 via "#prompt-textarea"
 [ShadowGuard] composer attached: <div id="prompt-textarea" …>
+ [ShadowGuard] INTERCEPTING ENTER 
 [ShadowGuard] bridge OK — reply from service worker: {type: "SG_PONG", …}
 ```
 
-Typing into the composer then logs, ~400ms after you stop:
+Pressing **Enter** with text in the composer cancels the send and logs a red `SEND BLOCKED` group.
+Shift+Enter, IME composition, an empty composer, and Enter outside the composer all pass through.
+Switching conversations (SPA navigation, no page reload) logs `composer RE-attached`.
 
-```
-[ShadowGuard] read 25 chars: "my api key is sk-test-123"
-```
-
-Switching conversations (SPA navigation, no page reload) logs
-`composer RE-attached (SPA navigation)` and reading keeps working.
-
-Nothing is intercepted yet, and there is no backend yet. The extension proves that our code runs
-inside the page, holds a live handle on the composer across navigation, can read what is typed,
-and can talk to the service worker.
+There is no backend yet and **no way to send an approved message** — the tab is one-way until you
+call `__sg.disable()`. Task 2.3 adds the replay.
 
 **Console handle for manual inspection** — switch the DevTools console context dropdown from `top`
 to **ShadowGuard AI** first, or these are undefined:
@@ -61,7 +56,13 @@ __sg.read()          // current composer text
 __sg.isEmpty()       // ProseMirror-aware empty check
 __sg.composer        // the live element
 __sg.watcher.find()  // {element, selector, tier}
+__sg.disable()       // stop blocking Enter, so the tab stays usable
+__sg.enable()        // resume blocking
+__sg.stats()         // {seen, intercepted, passed} — confirms guards fire
 ```
+
+`console.debug` lines (the "why did this Enter pass through" messages) are hidden unless the
+console filter is set to **Verbose**.
 
 ---
 
@@ -258,10 +259,11 @@ Content scripts load in the order listed in the manifest; each file depends on t
 | `extension/src/adapters/registry.js` | `registerAdapter()` / `resolveAdapter()`. Exact-hostname matching, not substring — substring matching is how extensions end up running on `chatgpt.evil-site.com` |
 | `extension/src/adapters/chatgpt.js` | **The only file that knows how ChatGPT is built.** Tiered composer/send-button selectors, `<textarea>` vs contenteditable text extraction, ProseMirror empty-state handling |
 | `extension/src/content/composer_watcher.js` | `MutationObserver` that discovers the composer and re-discovers it when SPA navigation detaches it. Reports selector-tier degradation |
+| `extension/src/content/interceptor.js` | Capture-phase `keydown` listener on `window` that cancels a send, plus the five guards that decide when not to |
 | `extension/src/content/content.js` | World 2 orchestration only — no site knowledge, no discovery logic. Re-injection guard, adapter selection, debounced read instrumentation, `__sg` debug handle, PING across the bridge |
 | `extension/src/background/service_worker.js` | World 3. Lifecycle logging and the message router; replies PONG to PING |
 
-### Three design decisions worth being able to defend
+### Design decisions worth being able to defend
 
 1. **`innerText`, not `textContent`.** ProseMirror renders one `<p>` per visual line.
    `textContent` ignores layout, so `<p>sk-proj-abc</p><p>def123</p>` becomes
@@ -276,6 +278,23 @@ Content scripts load in the order listed in the manifest; each file depends on t
 3. **`element.isConnected` guard.** The watcher callback runs on *every* DOM mutation, including
    every token streamed into an assistant reply. The guard makes the common case one property
    read. `offsetParent !== null` additionally filters hidden scaffolding ChatGPT leaves in the DOM.
+4. **Capture phase on `window`, not the composer.** A keydown travels window → … → composer
+   (capture), fires on the composer (target), then bubbles back up. `addEventListener` defaults to
+   **bubble**, which is too late — ChatGPT already sent. Attaching *capture* to the composer itself
+   is also insufficient: at the target element, capture and bubble listeners fire in **registration
+   order**, and ChatGPT registered first. Capture on an ancestor is the only placement the DOM spec
+   guarantees runs first.
+5. **Cancellation needs both `stopImmediatePropagation()` and `preventDefault()`.** ChatGPT sending
+   is *their JavaScript handler*, not a browser default action — so `preventDefault()` alone does
+   not stop it. Conversely `stopImmediatePropagation()` alone blocks the send but lets the browser
+   insert a newline into the box. Each omission is a distinct visible bug.
+6. **`event.isTrusted` instead of a bypass flag.** Synthetic events dispatched from JS are always
+   `isTrusted: false` and it cannot be forged, so Task 2.3's approved-send replay passes through
+   automatically — no "am I replaying?" boolean to leave stuck in the wrong state after an
+   exception.
+7. **IME guard (`isComposing` / `keyCode === 229`).** For Japanese, Chinese and Korean input, Enter
+   *confirms the IME candidate* rather than sending. Swallowing it would make ShadowGuard unusable
+   for a large share of the world's users — an internationalisation correctness issue, not a nicety.
 
 ### Permissions currently requested: **none**
 
@@ -313,8 +332,8 @@ Every task is independently testable — you know it works before moving on.
 
 | Task | Test | Status |
 |---|---|---|
-| 2.1 Capture-phase `keydown` listener cancels Enter | Press Enter, nothing sends, console logs the text | ⬜ **next** |
-| 2.2 Intercept the send-button click path | Clicking the arrow is also blocked | ⬜ |
+| 2.1 Capture-phase `keydown` listener cancels Enter | Press Enter, nothing sends, console logs the text | ✅ |
+| 2.2 Intercept the send-button click path | Clicking the arrow is also blocked | ⬜ **next** |
 | 2.3 Replay the send programmatically after approval | Message sends after a fake "approve" | ⬜ |
 | 2.4 Inject the modal UI (Shadow DOM) | Modal renders correctly over the page | ⬜ |
 | 2.5 Wire modal → Cancel discards, Proceed sends | Full loop works with a hardcoded verdict | ⬜ |
@@ -428,6 +447,8 @@ To be expanded for the report; recording as they come up:
 ## Git history
 
 ```
+cbe13bb  feat(extension): cancel Enter before ChatGPT can send
+1ae1803  docs: update README for Task 1.5 (composer discovery)
 d895312  feat(extension): locate ChatGPT composer via adapter + MutationObserver
 552ae37  docs: sync README git-history section
 1941d40  chore: ignore .claude/ local tool-permission state
