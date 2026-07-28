@@ -78,9 +78,9 @@ Backend must be running for rows 1–5.
 | # | Do | Expect |
 |---|---|---|
 | 1 | Type `how do I reverse a string in python`, Enter | **Sends normally, no modal.** Server logs `action=allow`. |
-| 2 | Type `the db password is hunter2`, Enter | 🔴 modal, score 70. Cancel → nothing sends, text stays. |
+| 2 | Type `charge 4111 1111 1111 1111`, Enter | 🔴 modal, score 75, `credit card`. Cancel → nothing sends, text stays. |
 | 3 | Same, then **Send anyway** | Sends |
-| 4 | Type `my key is sk-proj-abc123`, Enter | 🟣 critical, **no override button** |
+| 4 | Type `deploy key AKIAIOSFODNN7EXAMPLE`, Enter | 🟣 critical, **no override button** |
 | 5 | Same via the **arrow button** | Same modal, `trigger: send-button` |
 | 6 | **Stop the server**, send anything | ⬜ **grey** "offline, not inspected" modal, sending focused |
 | 7 | Restart server, send again | Normal verdicts resume |
@@ -92,6 +92,7 @@ Backend must be running for rows 1–5.
 | 13 | Send, then `__sg.sendButton()` **while the reply streams** | `null` |
 | 14 | Switch conversation in the sidebar | `composer RE-attached`. Interception still works. |
 | 15 | Esc on a warning modal | Treated as Cancel |
+| 16 | Type `charge 4111 1111 1111 1112` (last digit changed) | **No modal** — fails the Luhn checksum, so it is not a card |
 
 ### The rows that matter most
 
@@ -121,14 +122,19 @@ Request body → **Execute**.
 → `allow`, score 0
 
 ```json
-{"text": "the database password is hunter2", "user_id": "test", "platform": "chatgpt"}
+{"text": "email arushi@example.com about it", "user_id": "test", "platform": "chatgpt"}
 ```
-→ `warn`, score 70
+→ `allow`, score 20, `EMAIL` (an address alone is not a secret)
 
 ```json
-{"text": "my key is sk-proj-abc123def456", "user_id": "test", "platform": "chatgpt"}
+{"text": "charge 4111 1111 1111 1111 please", "user_id": "test", "platform": "chatgpt"}
 ```
-→ `block`, score 95
+→ `warn`, score 75, `CREDIT_CARD` — Luhn-validated. Change one digit and it disappears.
+
+```json
+{"text": "deploy key AKIAIOSFODNN7EXAMPLE", "user_id": "test", "platform": "chatgpt"}
+```
+→ `block`, score 95, `AWS_ACCESS_KEY_ID`
 
 ```json
 {"text": "hello", "platform": "chatgpt"}
@@ -160,8 +166,8 @@ The detector suite is structured around the two ways detection fails:
 The negative cases carry equal weight. It is trivial to write a detector that catches everything
 by flagging everything; the negative tests are what stop the module drifting that way.
 
-The suite asserts the **contract**, not the current detector's opinions — so it keeps working
-when the stub is replaced by real detectors.
+The endpoint suite asserts the **contract** rather than any detector's opinions, which is why it
+survived the stub being replaced by the real detector without a single change.
 
 ---
 

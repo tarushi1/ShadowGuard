@@ -76,11 +76,13 @@ Each entity:
   "action": "block",
   "level": "critical",
   "score": 95,
-  "entities": [{ "type": "STUB_SECRET", "start": 10, "end": 13, "score": 1.0, "detector": "stub" }],
-  "message": "A credential was detected in this message. Sending has been blocked.",
+  "entities": [
+    { "type": "OPENAI_API_KEY", "start": 10, "end": 40, "score": 0.98, "detector": "regex" }
+  ],
+  "message": "This message contains openai api key. Sending has been blocked — remove it before trying again.",
   "redacted_text": null,
-  "latency_ms": 0.027,
-  "stages_run": ["stub"]
+  "latency_ms": 0.034,
+  "stages_run": ["regex"]
 }
 ```
 
