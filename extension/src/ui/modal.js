@@ -394,8 +394,19 @@ globalThis.SG.WarningModal = class WarningModal {
     resolve?.(decision);
   }
 
+  /**
+   * Is a decision currently outstanding?
+   *
+   * Callers need this because showModal() throws a DOMException if the
+   * dialog is already open — and the user can absolutely press Enter
+   * again behind an open warning.
+   */
+  get isOpen() {
+    return this.dialog?.open === true;
+  }
+
   /** Force-close without a user decision (SPA navigation, teardown). */
   dismiss() {
-    if (this.dialog?.open) this.#settle("cancel");
+    if (this.isOpen) this.#settle("cancel");
   }
 };

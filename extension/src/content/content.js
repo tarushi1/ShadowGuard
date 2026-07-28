@@ -15,11 +15,11 @@
  *   - see the page's own JavaScript variables (isolated world)
  *   - call our backend directly (that is the service worker's job)
  *
- * At this stage (Task 2.3) it cancels every send path — Enter, the
- * send button, form submission — holds the message, and can replay it
- * on approval. The approval still comes from the console; Tasks 2.4
- * and 2.5 replace that with the modal, and Week 3 makes the verdict
- * come from the backend rather than a human guess.
+ * At this stage (Task 2.5) the full Week 2 mechanism is in place:
+ * every send path is cancelled, the message is held, a verdict decides
+ * whether to replay it silently or show the modal, and the user's
+ * choice resolves it. The verdict still comes from a deliberately
+ * stupid local placeholder; Week 3 replaces that with the backend.
  */
 
 (() => {
@@ -129,42 +129,136 @@
   // on every SPA navigation, and a captured reference would go stale
   // silently — the listener would keep firing and keep comparing the
   // event target against a node that left the document minutes ago.
-  const interceptor = new SG.Interceptor(
-    adapter,
-    () => composer,
-    (text, context) => {
-      // Hold the cancelled send. In Task 2.5 the modal reads this and
-      // the user's button click resolves it; today it waits for a
-      // manual __sg.approve() or __sg.discard() from the console.
-      //
-      // We store the text even though the composer still contains it,
-      // because from Week 3 this is the exact string that was sent to
-      // the backend and scored. If the user edits the box while the
-      // modal is open, approving must not send text that was never
-      // analysed — a check we can only make by comparing against what
-      // we captured. That is a real bypass, not a hypothetical one.
-      pending = { text, trigger: context.trigger, at: Date.now() };
-
-      console.group(`%c ${TAG} SEND BLOCKED `, "background:#b3261e; color:#fff; font-weight:bold;");
-      console.log("trigger :", context.trigger);
-      console.log("length  :", text.length, "chars");
-
-      // TEMPORARY — REMOVE BEFORE ANY REAL USE.
-      // Printing the raw prompt to the console is exactly the class
-      // of data exposure this project exists to prevent. It is here
-      // only so this task is visibly testable on your own machine.
-      // From Week 3 the text goes to the backend and is never logged.
-      console.log("text    :", JSON.stringify(text));
-
-      console.log(
-        "%crun __sg.approve() to send, or __sg.discard() to keep it blocked.",
-        "color:#888; font-style:italic;"
-      );
-      console.groupEnd();
-    }
-  );
+  const interceptor = new SG.Interceptor(adapter, () => composer, handleIntercept);
 
   interceptor.start();
+
+  /**
+   * The decision flow. Runs every time a send is cancelled.
+   *
+   *   intercept → analyse → allow?  ──yes──► replay silently
+   *                           │
+   *                           no
+   *                           ▼
+   *                      show modal → proceed → replay
+   *                                 └ cancel  → discard
+   *
+   * @param {string} text
+   * @param {{trigger: string}} context
+   */
+  async function handleIntercept(text, context) {
+    // ---- Guard: a decision is already outstanding ---------------
+    // The listener stays active while the modal is up, so the user
+    // can press Enter again behind the dialog. showModal() throws a
+    // DOMException on an already-open dialog, and overwriting
+    // `pending` here would silently swap which message gets sent when
+    // they click Proceed — the wrong text going out under an approval
+    // the user gave for different text.
+    if (modal.isOpen) {
+      console.debug(`${TAG} a decision is already pending — ignoring this send.`);
+      return;
+    }
+
+    pending = { text, trigger: context.trigger, at: Date.now() };
+
+    // TEMPORARY — deleted in Week 3, when the service worker calls the
+    // backend and this becomes `await requestVerdict(text)`.
+    const verdict = placeholderVerdict(text);
+
+    console.log(
+      `${TAG} ${context.trigger} → ${verdict.action.toUpperCase()} ` +
+      `(score ${verdict.score}, ${verdict.entities.join(", ") || "no entities"})`
+    );
+
+    // ---- allow: the user never learns we were here --------------
+    // Once every send is intercepted, a safe message still has to get
+    // through, silently. In Week 3 this path carries the latency of a
+    // real HTTP round trip, which is why the backend has to be fast.
+    if (verdict.action === SG.ACTION.ALLOW) {
+      approve({ silent: true });
+      return;
+    }
+
+    const decision = await modal.show({
+      level: verdict.level,
+      score: verdict.score,
+      entities: verdict.entities,
+      message: verdict.message,
+      preview: verdict.preview,
+
+      // No override at block severity. warn is advisory; block is not.
+      allowProceed: verdict.action !== SG.ACTION.BLOCK,
+    });
+
+    if (decision === "proceed") {
+      approve();
+    } else {
+      discard();
+    }
+  }
+
+  // ---------------------------------------------------------------
+  // TEMPORARY placeholder verdict — DELETE IN WEEK 3
+  // ---------------------------------------------------------------
+  /**
+   * Stand-in for the backend, so the four action paths can be
+   * exercised before any Python exists.
+   *
+   * This is deliberately stupid — three substring checks — and it is
+   * NOT the beginning of a detection engine. Detection logic must not
+   * live in the extension:
+   *
+   *   1. The architecture is "the browser detects and enforces, the
+   *      server decides". Splitting the decision across two languages
+   *      means two implementations to keep in sync.
+   *
+   *   2. More importantly for the evaluation: the Week 3 harness is
+   *      Python and calls the detectors directly. Anything implemented
+   *      in JavaScript is invisible to it, so it contributes nothing to
+   *      the precision/recall numbers. Logic the harness cannot call
+   *      does not exist as far as the report is concerned.
+   *
+   * @param {string} text
+   * @returns {{action: string, level: string, score: number,
+   *            entities: string[], message: string, preview: string}}
+   */
+  function placeholderVerdict(text) {
+    const preview = text.length > 160 ? `${text.slice(0, 160)}…` : text;
+
+    if (/\bsk-[A-Za-z0-9-]{8,}/.test(text) || text.includes("BEGIN PRIVATE KEY")) {
+      return {
+        action: SG.ACTION.BLOCK,
+        level: "critical",
+        score: 96,
+        entities: ["SECRET_KEY"],
+        message:
+          "A credential was detected in this message. Sending has been blocked.",
+        preview,
+      };
+    }
+
+    if (/\bAKIA[0-9A-Z]{6,}/.test(text) || /password\s*[:=]/i.test(text)) {
+      return {
+        action: SG.ACTION.WARN,
+        level: "high",
+        score: 74,
+        entities: ["CREDENTIAL"],
+        message:
+          "This message appears to contain credential-like content. " +
+          "Review it before sending.",
+        preview,
+      };
+    }
+
+    return {
+      action: SG.ACTION.ALLOW,
+      level: "low",
+      score: 4,
+      entities: [],
+      message: "No sensitive content detected.",
+      preview,
+    };
+  }
 
   // ---------------------------------------------------------------
   // Pending send + replay
@@ -176,13 +270,20 @@
    *
    * @returns {boolean} whether a replay was attempted
    */
-  function approve() {
+  function approve({ silent = false } = {}) {
     if (!pending) {
       console.warn(`${TAG} nothing pending to approve.`);
       return false;
     }
+
+    // The composer can disappear between interception and decision —
+    // the user navigates to another conversation while the modal is
+    // open, React unmounts the editor, and there is nothing left to
+    // replay into. Failing loudly beats silently dropping an approved
+    // message, which the user would read as "I clicked send and
+    // nothing happened".
     if (!composer) {
-      console.error(`${TAG} composer went away — cannot replay.`);
+      console.error(`${TAG} composer went away before approval — nothing to replay into.`);
       pending = null;
       return false;
     }
@@ -205,11 +306,18 @@
     const held = pending;
     pending = null;
 
-    console.log(
-      `%c ${TAG} SEND REPLAYED `,
-      "background:#0a7d47; color:#fff; padding:2px 6px; border-radius:3px;",
-      `via ${result.method} (${result.detail})`
-    );
+    // An allowed send is the common case and must not spam the console
+    // on every message — but it still gets one quiet line, because a
+    // silent security control is an unauditable one.
+    if (silent) {
+      console.debug(`${TAG} allowed and sent via ${result.method}.`);
+    } else {
+      console.log(
+        `%c ${TAG} SEND REPLAYED `,
+        "background:#0a7d47; color:#fff; padding:2px 6px; border-radius:3px;",
+        `via ${result.method} (${result.detail})`
+      );
+    }
 
     // ---- Verify the effect, do not assume the action worked ----
     // A send that silently no-ops is the worst outcome: the user

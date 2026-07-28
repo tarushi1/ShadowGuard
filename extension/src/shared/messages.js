@@ -24,6 +24,26 @@
 
 globalThis.SG = globalThis.SG || {};
 
+/**
+ * The four verdicts the risk engine can return.
+ *
+ * Defined here, in the shared vocabulary, because from Week 3 these
+ * strings travel from Python → service worker → content script → UI.
+ * Every layer must agree on their spelling, and a mismatch fails the
+ * same silent way a mistyped message type does.
+ *
+ *   allow   send it, say nothing
+ *   warn    show the modal, user may override
+ *   redact  replace the sensitive spans, then send      (Week 5)
+ *   block   show the modal with no override, and log
+ */
+globalThis.SG.ACTION = Object.freeze({
+  ALLOW: "allow",
+  WARN: "warn",
+  REDACT: "redact",
+  BLOCK: "block",
+});
+
 globalThis.SG.MSG = Object.freeze({
   // Task 1.4 — liveness check across the bridge.
   PING: "SG_PING",
