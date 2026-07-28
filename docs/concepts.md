@@ -243,6 +243,35 @@ which is what makes it realistic to run them on every change.
 
 ## Detection and evaluation
 
+### Luhn algorithm (mod-10 checksum)
+Double every second digit from the right; if doubling exceeds 9, subtract 9. The total must be
+divisible by 10. Essentially every payment card satisfies it.
+
+*Why it matters here:* `\d{16}` matches every order number, invoice id and tracking code in
+existence. Roughly nine in ten random 16-digit strings **fail** Luhn, so one validator function
+cuts that rule's false positives by about an order of magnitude. It is a checksum, not a
+signature — it catches typos and random strings, not deliberate forgery, which is exactly what is
+needed. **This is the project's thesis in miniature: validation beats pattern matching.**
+→ `backend/app/detectors/regex_detector.py`
+
+### ReDoS (catastrophic backtracking)
+Nested quantifiers such as `(a+)+` can make a regex take **exponential** time, so a 30-character
+input hangs a server for minutes. A real denial-of-service class, not a theoretical one.
+
+*Mitigations here:* every pattern uses **bounded** quantifiers and avoids nesting; the API caps
+input at 100,000 characters; and a test asserts a 100 KB scan completes in under two seconds, so
+it fails loudly if someone adds an unsafe pattern.
+
+### Confidence vs severity
+Two different questions, deliberately separate fields on a `Finding`:
+
+- **Confidence** — how sure is the detector that it found what it claims? A
+  `-----BEGIN PRIVATE KEY-----` header is 1.0; a bare 12-digit number is 0.7.
+- **Severity** — how bad would this be *if true*? A property of the entity **type**.
+
+Conflating them causes real bugs: ranking overlapping matches by severity first let a weak
+`critical` guess beat a checksum-validated `high` match. See [D16](decisions.md#d16--overlap-resolution-ranks-confidence-before-severity).
+
 ### Shannon entropy
 A measure of randomness in bits per character. English prose sits around 3.5–4.0; a random API
 key approaches 5.0+ for base64 alphabets. Catches secrets whose *format* is unknown — the

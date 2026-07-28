@@ -146,9 +146,19 @@ curl -s -X POST http://127.0.0.1:8000/api/v1/analyze \
 ### Automated
 
 ```bash
-pytest -q          # expect: 14 passed
-pytest -v          # per-test names
+pytest -q                                    # expect: 73 passed
+pytest backend/tests/test_regex_detector.py -v   # detector only
+pytest -v                                    # per-test names
 ```
+
+The detector suite is structured around the two ways detection fails:
+
+- **Positive cases → recall.** What we miss is a *security* failure.
+- **Negative cases → precision.** What we wrongly flag is an *adoption* failure, and a tool
+  people disable has a recall of zero.
+
+The negative cases carry equal weight. It is trivial to write a detector that catches everything
+by flagging everything; the negative tests are what stop the module drifting that way.
 
 The suite asserts the **contract**, not the current detector's opinions — so it keeps working
 when the stub is replaced by real detectors.

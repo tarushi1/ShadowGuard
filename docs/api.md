@@ -84,6 +84,28 @@ Each entity:
 }
 ```
 
+### Entity types currently detected (Stage 1a)
+
+| Type | Severity | Confidence | Notes |
+|---|---|---|---|
+| `PRIVATE_KEY` | critical | 1.00 | PEM / OpenSSH header — nothing else looks like it |
+| `ANTHROPIC_API_KEY` | critical | 0.99 | |
+| `GITHUB_TOKEN` / `GITHUB_PAT` | critical | 0.99 | |
+| `STRIPE_SECRET_KEY` | critical | 0.99 | `sk_live_` only; `sk_test_` deliberately ignored |
+| `OPENAI_API_KEY` | critical | 0.98 | incl. `sk-proj-`, `sk-svcacct-` |
+| `AWS_ACCESS_KEY_ID` | critical | 0.97 | `AKIA` long-lived, `ASIA` session |
+| `SLACK_TOKEN` | critical | 0.97 | |
+| `US_SSN` | critical | 0.90 | never-issued ranges excluded |
+| `INDIA_AADHAAR` | critical | 0.70 | Verhoeff checksum not yet implemented — known precision gap |
+| `GOOGLE_API_KEY` | high | 0.96 | |
+| `JWT` | high | 0.95 | |
+| `CREDIT_CARD` | high | 0.90 | **Luhn-validated** |
+| `INDIA_PAN` | high | 0.85 | |
+| `IBAN` | high | 0.80 | mod-97 checksum not yet implemented |
+| `EMAIL` | low | 0.95 | not a secret alone; matters in combination |
+
+Measured latency: **~0.04 ms** per message end to end.
+
 ### Three properties worth understanding
 
 **Offsets, never values.** `entities` carries positions into text the client already has. The

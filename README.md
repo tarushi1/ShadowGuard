@@ -31,10 +31,10 @@ It computes a risk score and decides whether to **allow**, **warn**, **redact**,
 |---|---|
 | **Last updated** | 2026-07-29 |
 | **Project root** | `/Users/arushitiwari/Desktop/ShadowGuard` |
-| **Git branch** | `main` (23 commits, working tree clean) |
+| **Git branch** | `main` (26 commits, working tree clean) |
 | **Current stage** | Stage 0 complete. Stage 1 in progress — extension and backend are connected end to end. |
-| **Completed** | Week 1 (1.1–1.5), Week 2 (2.1–2.5), Week 3 (3.1–3.3) — all **verified**. 2.6 deferred to Week 6. |
-| **Next task** | **3.4 — the real regex detector, replacing the stub** |
+| **Completed** | Week 1 (1.1–1.5), Week 2 (2.1–2.5), Week 3 (3.1–3.4) — all **verified**. 2.6 deferred to Week 6. |
+| **Next task** | **3.5 — Shannon entropy scorer** |
 | **Deadline** | ~2026-09-20 (8 weeks from 2026-07-26) |
 | **Weeks elapsed** | ~0.4 of 8 — ahead of plan |
 
@@ -65,15 +65,16 @@ A safe message replays silently and the user never knows ShadowGuard was there. 
 the Shadow-DOM modal: **Cancel** blocks and leaves the text for editing, **Send anyway** replays
 it. At `block` severity there is no override button at all.
 
-**The extension now contains zero detection logic.** Every verdict comes from Python. The backend
-still runs a two-substring stub in `pipeline/orchestrator.py`, deleted in Task 3.4 when the real
-regex detector lands.
+**The extension contains zero detection logic** — every verdict comes from Python. Stage 1a is
+live: **16 regex rules** covering vendor API keys, private keys, JWTs, Luhn-validated payment
+cards, IBAN, US SSN, Indian PAN and Aadhaar, and email. Measured at **~0.04 ms** per message.
 
 If the backend is unreachable, a **grey** "offline — not inspected" modal appears and sending is
 the focused default (fail open, visibly — see [D12](docs/decisions.md)).
 
-Try it: `hello` sends straight through; `the db password is hunter2` warns; `sk-proj-abc123def456`
-blocks. Then stop the server and send anything to see the offline path.
+Try it: `how do I sort a list in python` sends straight through; `charge 4111 1111 1111 1111`
+warns (Luhn-validated card); `deploy key AKIAIOSFODNN7EXAMPLE` blocks. Then stop the server and
+send anything to see the offline path.
 
 Each request carries a `request_id` that appears in **both** the browser console and the uvicorn
 terminal — that correlation is what makes an incident traceable across systems.
@@ -413,8 +414,8 @@ Every task is independently testable — you know it works before moving on.
 | 3.1 Python 3.12 + venv + `fastapi uvicorn` | `/docs` opens in the browser | ✅ |
 | 3.2 `POST /api/v1/analyze` returning a stub verdict | `curl` gets JSON back | ✅ |
 | 3.3 Connect extension → backend end-to-end | Real modal driven by a real HTTP response ← **first true milestone** | ✅ |
-| 3.4 Regex detector module (API keys, cards, emails, IBAN, JWT) | Unit tests pass on positive + negative cases | ⬜ **next** |
-| 3.5 Shannon entropy scorer | High on random keys, low on English prose | ⬜ |
+| 3.4 Regex detector module (API keys, cards, emails, IBAN, JWT) | Unit tests pass on positive + negative cases | ✅ 73 tests |
+| 3.5 Shannon entropy scorer | High on random keys, low on English prose | ⬜ **next** |
 | 3.6 Labelled test corpus (~150 samples) | A CSV you can rerun forever | ⬜ |
 | 3.7 Evaluation harness (precision / recall / FPR) | A printed metrics table | ⬜ |
 

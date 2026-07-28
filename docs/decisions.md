@@ -195,6 +195,54 @@ about the existing system changed.
 
 ---
 
+## D15 — Detectors return an internal `Finding`, not the API type
+**Date:** 2026-07-29 · **Status:** active
+
+Detectors genuinely need the matched **value** internally: the entropy stage scores it, Week 5's
+redaction replaces it, and the evaluation harness reports on it. The API must never return it
+([D10](#d10--the-response-never-echoes-the-users-text)).
+
+**Chosen:** two types. `detectors/base.py::Finding` carries `value`; `schemas/analyze.py::DetectedEntity`
+does not. The pipeline maps between them and drops the field.
+
+**Consequence:** the privacy boundary is **structural** rather than a rule you must remember. To
+leak a value you would have to add a field to `DetectedEntity` *and* write the mapping code — a
+deliberate act. Had detectors returned the API type directly, the value would already be there and
+safety would depend on remembering to strip it.
+
+---
+
+## D16 — Overlap resolution ranks confidence before severity
+**Date:** 2026-07-29 · **Status:** active
+
+Patterns genuinely overlap: a JWT is base64 that other rules match fragments of; a twelve-digit
+Aadhaar pattern matches the first twelve digits of a sixteen-digit card.
+
+**Original ranking (severity → confidence → length) was wrong**, and the negative tests caught it.
+Aadhaar is `critical` at 0.7 confidence; `CREDIT_CARD` is `high` at 0.9 *and* Luhn-validated. A
+spaced card number was therefore reported as a national identifier.
+
+**Chosen:** rank by **confidence → severity → span length**, and tighten the Aadhaar pattern with
+lookarounds so it cannot match inside a longer digit run.
+
+**Reasoning:** severity says how bad a finding would be *if true*; confidence says how likely it is
+*to be true*. Choosing between two candidate readings of the same characters is a question about
+truth, not consequence.
+
+---
+
+## D17 — Do not flag things that are not secrets
+**Date:** 2026-07-29 · **Status:** active
+
+Stripe **test** keys (`sk_test_`) are deliberately unmatched, even though `sk_live_` is critical.
+SSN ranges the SSA never issues are excluded by negative lookahead.
+
+**Reasoning:** warnings that fire on harmless things teach people to dismiss warnings, and
+dismissing warnings is how real leaks get through. **False negatives are the security failure;
+false positives are the adoption failure** — and a tool people disable has a recall of zero.
+
+---
+
 ## Still open
 
 | Question | Decide by |
