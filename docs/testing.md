@@ -160,7 +160,8 @@ curl -s -X POST http://127.0.0.1:8000/api/v1/analyze \
 ### Automated
 
 ```bash
-pytest -q                                    # expect: 101 passed
+pytest -q                                    # expect: 111 passed
+python -m evaluation.corpus                  # summarise the labelled corpus
 pytest backend/tests/test_regex_detector.py -v   # detector only
 pytest -v                                    # per-test names
 ```

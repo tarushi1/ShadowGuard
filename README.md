@@ -22,6 +22,7 @@ It computes a risk score and decides whether to **allow**, **warn**, **redact**,
 | [docs/api.md](docs/api.md) | The HTTP contract between extension and backend |
 | [docs/security.md](docs/security.md) | Threat model, known bypasses, privacy, ethics, limitations |
 | [docs/testing.md](docs/testing.md) | How to verify every component and debug by symptom |
+| [evaluation/README.md](evaluation/README.md) | The corpus, its methodology, and the threats to validity — **report material** |
 
 ---
 
@@ -31,10 +32,10 @@ It computes a risk score and decides whether to **allow**, **warn**, **redact**,
 |---|---|
 | **Last updated** | 2026-07-29 |
 | **Project root** | `/Users/arushitiwari/Desktop/ShadowGuard` |
-| **Git branch** | `main` (29 commits, working tree clean) |
+| **Git branch** | `main` (32 commits, working tree clean) |
 | **Current stage** | Stage 0 complete. Stage 1 in progress — extension and backend are connected end to end. |
-| **Completed** | Week 1 (1.1–1.5), Week 2 (2.1–2.5), Week 3 (3.1–3.5) — all **verified**. 2.6 deferred to Week 6. |
-| **Next task** | **3.6 — build the labelled test corpus (~150 samples)** |
+| **Completed** | Week 1 (1.1–1.5), Week 2 (2.1–2.5), Week 3 (3.1–3.6) — all **verified**. 2.6 deferred to Week 6. |
+| **Next task** | **3.7 — the evaluation harness (precision / recall / FPR)** |
 | **Deadline** | ~2026-09-20 (8 weeks from 2026-07-26) |
 | **Weeks elapsed** | ~0.4 of 8 — ahead of plan |
 
@@ -424,8 +425,8 @@ Every task is independently testable — you know it works before moving on.
 | 3.3 Connect extension → backend end-to-end | Real modal driven by a real HTTP response ← **first true milestone** | ✅ |
 | 3.4 Regex detector module (API keys, cards, emails, IBAN, JWT) | Unit tests pass on positive + negative cases | ✅ 73 tests |
 | 3.5 Shannon entropy scorer | High on random keys, low on English prose | ✅ 101 tests |
-| 3.6 Labelled test corpus (~150 samples) | A CSV you can rerun forever | ⬜ **next** |
-| 3.7 Evaluation harness (precision / recall / FPR) | A printed metrics table | ⬜ |
+| 3.6 Labelled test corpus (~150 samples) | A rerunnable labelled dataset | ✅ 150 samples, JSONL |
+| 3.7 Evaluation harness (precision / recall / FPR) | A printed metrics table | ⬜ **next** |
 
 ### Week 4 — Stage 2: semantic analysis
 Presidio setup · spaCy model · custom recognizers · context words · confidence scores · merging

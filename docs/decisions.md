@@ -286,6 +286,43 @@ for never running later stages).
 
 ---
 
+## D21 — Corpus labels the action, not the entity
+**Date:** 2026-07-29 · **Status:** locked
+
+`label` answers *"should this have been allowed through?"*, not *"does this contain a detectable
+entity"*.
+
+**Reasoning:** `email me at arushi@example.com` contains a detectable entity, but `EMAIL` is `low`
+severity and the correct action is **allow**. Labelling by entity presence would score the
+pipeline as wrong for behaving exactly as designed. The product decides actions, so the corpus
+labels actions.
+
+---
+
+## D22 — Balanced corpus, with the base-rate correction reported alongside
+**Date:** 2026-07-29 · **Status:** locked
+
+**Chosen:** 75/75, and the harness prints *both* balanced precision and precision corrected for an
+assumed 1% real-world prevalence.
+
+**Reasoning:** a balanced corpus gives reliable recall and FPR. It also **inflates precision** —
+at *p* = 0.01, a system reporting 95% precision on balanced data achieves ~15% in reality.
+Reporting only the flattering figure would be misleading, and an evaluator who knows the base-rate
+fallacy will ask.
+
+---
+
+## D23 — JSONL, not the CSV the roadmap named
+**Date:** 2026-07-29 · **Status:** active
+
+Prompts contain commas, double quotes and newlines — the three things that break CSV.
+
+**Consequence:** a corpus that loses a sample to a parse error still produces metrics, describing
+less data than you believe, with nothing anywhere to say so. `corpus.py` additionally validates
+strictly and fails on the first bad row rather than skipping it.
+
+---
+
 ## Still open
 
 | Question | Decide by |

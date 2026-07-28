@@ -322,6 +322,22 @@ The asymmetry matters and belongs in the report: **false negatives are the secur
 false positives are the adoption failure.** A tool that cries wolf gets disabled, at which point
 its recall is zero.
 
+### Base rate and why balanced-corpus precision lies
+Our corpus is 50/50 sensitive/benign, which gives reliable **recall** and **FPR** — both have 75
+samples behind them. But **precision measured on a balanced corpus overstates real precision**,
+because real traffic is perhaps 1% sensitive.
+
+With recall *r*, false-positive rate *f*, and prevalence *p*:
+
+```
+precision_real = (r · p) / (r · p + f · (1 − p))
+```
+
+At *p* = 0.01, a system with 90% recall and a 5% FPR reports ~95% precision on a balanced corpus
+but achieves **~15%** in reality. This is the base-rate fallacy, and it is the single most common
+way security-tool evaluations mislead. The harness prints both figures.
+→ `evaluation/README.md`
+
 ### Short-circuiting
 When Stage 1 finds a critical secret, the pipeline skips Stage 2 — no point spending ~50ms of
 spaCy to confirm something already certain. `stages_run` in the response records what actually
