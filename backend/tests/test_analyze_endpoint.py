@@ -103,7 +103,7 @@ def test_non_critical_input_runs_every_stage():
     conditional, not an excuse for never running the later stages."""
     body = client.post(ENDPOINT, json=payload("how do I sort a list")).json()
 
-    assert body["stages_run"] == ["regex", "entropy"]
+    assert body["stages_run"] == ["regex", "entropy", "semantic"]
 
 
 def test_latency_is_measured_and_plausible():
@@ -215,3 +215,48 @@ def test_health_has_no_dependencies():
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+
+
+# ---------------------------------------------------------------
+# Stage 2 merge — regression
+# ---------------------------------------------------------------
+
+def test_a_semantic_label_never_suppresses_a_secret():
+    """Regression for five false negatives introduced by Stage 2.
+
+    spaCy labels random tokens like `Kp3Vx9Nm2Qr7Ts5Yw1Bz8Ld4Hg6Jf0Ac`
+    as PERSON at 0.85 confidence, because a random token in that
+    sentence position looks like a name to it.
+
+    Merging with `resolve_overlaps` ranked by confidence, so that
+    `low`-severity guess displaced the `medium`-severity entropy
+    finding on the same span and the message was ALLOWED.
+
+    The two cases are not alike. Aadhaar-vs-card is a competing claim
+    about what the characters ARE, where confidence is the right
+    arbiter. A semantic label and a secret classification are not
+    competing — spaCy has simply mislabelled a random token. Stage 1
+    is authoritative on spans it has already classified.
+    """
+    body = client.post(
+        ENDPOINT,
+        json=payload("set AUTH_SECRET=Kp3Vx9Nm2Qr7Ts5Yw1Bz8Ld4Hg6Jf0Ac in the staging env"),
+    ).json()
+
+    assert body["action"] != "allow", "a secret was allowed through"
+    assert "HIGH_ENTROPY_STRING" in {e["type"] for e in body["entities"]}
+
+
+def test_semantic_findings_survive_where_stage_1_claimed_nothing():
+    """The merge rule must be a filter, not a mute button.
+
+    Stage 2 exists to add categories Stage 1 cannot reach; if the
+    overlap rule suppressed it everywhere, the stage would cost 3ms
+    per message and contribute nothing.
+    """
+    body = client.post(
+        ENDPOINT,
+        json=payload("customer Sarah Chen from Northbank called about her account"),
+    ).json()
+
+    assert "PERSON" in {e["type"] for e in body["entities"]}

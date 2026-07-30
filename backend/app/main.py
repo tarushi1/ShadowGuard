@@ -35,11 +35,13 @@ Run it with:
 """
 
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .api.routes import analyze as analyze_routes
+from .detectors import semantic_detector
 
 # One log line per request, with the decision but never the content.
 # Configured here rather than per-module so every logger in the app
@@ -57,7 +59,37 @@ logging.basicConfig(
 # showing up as mysterious failures.
 API_VERSION = "0.1.0"
 
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """Startup and shutdown hooks.
+
+    The modern replacement for @app.on_event, which FastAPI has
+    deprecated. Code before `yield` runs at startup, code after it at
+    shutdown, and having both in one function makes it obvious when a
+    resource is acquired but never released.
+
+    Warming up the Stage 2 model here moves the ~1s spaCy load to a
+    moment when nobody is waiting. Without it, exactly one unlucky user
+    per server restart pays that cost on top of their analysis and
+    experiences ShadowGuard as broken.
+
+    Deliberately tolerant of failure: a missing model should degrade
+    Stage 2, not stop the process serving Stage 1. A DLP tool that
+    refuses to start because one detector is unavailable protects
+    nothing at all.
+    """
+    try:
+        semantic_detector.warm_up()
+    except Exception:  # noqa: BLE001 - startup must never be fatal
+        logging.getLogger(__name__).exception(
+            "Stage 2 model failed to load; semantic detection will be unavailable"
+        )
+
+    yield
+
+
 app = FastAPI(
+    lifespan=lifespan,
     title="ShadowGuard AI",
     description=(
         "Context-aware, multimodal data loss prevention for enterprise "

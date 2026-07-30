@@ -74,13 +74,23 @@ class Outcome:
         return "FN" if self.sample.is_sensitive else "FP"
 
 
-def evaluate(samples: list[Sample], *, use_entropy: bool) -> list[Outcome]:
+# The configurations compared on every run. Named here rather than
+# assembled ad hoc so the report and the code cannot disagree about
+# what "baseline" means.
+CONFIGURATIONS: dict[str, dict[str, bool]] = {
+    "regex only":     {"use_entropy": False, "use_semantic": False},
+    "stage 1":        {"use_entropy": True,  "use_semantic": False},
+    "stage 1 + 2":    {"use_entropy": True,  "use_semantic": True},
+}
+
+
+def evaluate(samples: list[Sample], **stages: bool) -> list[Outcome]:
     """Run one configuration over every sample."""
     outcomes: list[Outcome] = []
 
     for sample in samples:
         started = time.perf_counter()
-        result = orchestrator.run_stages(sample.text, use_entropy=use_entropy)
+        result = orchestrator.run_stages(sample.text, **stages)
         elapsed_ms = (time.perf_counter() - started) * 1000
 
         outcomes.append(
@@ -196,33 +206,39 @@ def _failures(outcomes: list[Outcome]) -> str:
     return "\n".join(lines)
 
 
-def _comparison(baseline: Confusion, full: Confusion) -> str:
-    def delta(a: float, b: float, higher_is_better: bool) -> str:
-        diff = b - a
-        if abs(diff) < 0.0005:
-            return "     ="
-        arrow = "+" if diff > 0 else ""
-        good = (diff > 0) == higher_is_better
-        return f"{arrow}{diff:.1%} {'✓' if good else '✗'}"
+def _comparison(results: dict[str, tuple[Confusion, list[Outcome]]]) -> str:
+    """Side-by-side across every configuration.
+
+    The report's central claim is a DIFFERENCE between configurations,
+    so they are measured in one run, on the same samples, and printed
+    together. Numbers gathered from separate runs at separate times
+    invite exactly the doubt this table exists to remove.
+    """
+    names = list(results)
+    header = f"  {'metric':<18}" + "".join(f"{n:>14}" for n in names)
+
+    def row(label: str, get) -> str:
+        return f"  {label:<18}" + "".join(f"{get(results[n][0]):>13.1%} " for n in names)
+
+    def latency_row() -> str:
+        return f"  {'latency p95':<18}" + "".join(
+            f"{percentile([o.latency_ms for o in results[n][1]], 95):>11.3f}ms " for n in names
+        )
 
     return "\n".join(
         [
-            "REGEX-ONLY BASELINE  vs  FULL STAGE 1",
+            "CONFIGURATION COMPARISON",
             _rule(),
-            f"  {'metric':<18} {'baseline':>10} {'full':>10}   change",
-            f"  {'recall':<18} {baseline.recall:>10.1%} {full.recall:>10.1%}   "
-            f"{delta(baseline.recall, full.recall, True)}",
-            f"  {'false-positive':<18} {baseline.false_positive_rate:>10.1%} "
-            f"{full.false_positive_rate:>10.1%}   "
-            f"{delta(baseline.false_positive_rate, full.false_positive_rate, False)}",
-            f"  {'precision':<18} {baseline.precision:>10.1%} {full.precision:>10.1%}   "
-            f"{delta(baseline.precision, full.precision, True)}",
-            f"  {'F1':<18} {baseline.f1:>10.1%} {full.f1:>10.1%}   "
-            f"{delta(baseline.f1, full.f1, True)}",
+            header,
+            row("recall", lambda c: c.recall),
+            row("false-positive", lambda c: c.false_positive_rate),
+            row("precision", lambda c: c.precision),
+            row("precision @ 1%", lambda c: c.precision_at_prevalence()),
+            row("F1", lambda c: c.f1),
+            latency_row(),
             "",
-            "  This is the comparison the report is built on. Entropy should",
-            "  raise recall (it finds unknown formats) at some cost in false",
-            "  positives — and the trade needs to be stated, not hidden.",
+            "  Measured in one run, on the same samples, so the differences",
+            "  are attributable to the configuration and nothing else.",
         ]
     )
 
@@ -235,11 +251,12 @@ def main() -> None:
 
     samples = load()
 
-    baseline_outcomes = evaluate(samples, use_entropy=False)
-    full_outcomes = evaluate(samples, use_entropy=True)
+    results: dict[str, tuple[Confusion, list[Outcome]]] = {}
+    for name, stages in CONFIGURATIONS.items():
+        outcomes = evaluate(samples, **stages)
+        results[name] = (confusion_for(outcomes), outcomes)
 
-    baseline = confusion_for(baseline_outcomes)
-    full = confusion_for(full_outcomes)
+    full, full_outcomes = results["stage 1 + 2"]
 
     by_difficulty: dict[str, list[Outcome]] = defaultdict(list)
     by_category: dict[str, list[Outcome]] = defaultdict(list)
@@ -255,9 +272,9 @@ def main() -> None:
           f"{sum(not s.is_sensitive for s in samples)} benign)")
     print(_rule("=", 74))
     print()
-    print(_headline("FULL STAGE 1  (regex + entropy)", full))
+    print(_headline("FULL PIPELINE  (regex + entropy + semantic)", full))
     print()
-    print(_comparison(baseline, full))
+    print(_comparison(results))
     print()
     print(_breakdown("BY DIFFICULTY", by_difficulty))
     print()
@@ -279,8 +296,7 @@ def main() -> None:
         payload = {
             "corpus_size": len(samples),
             "assumed_prevalence": ASSUMED_PREVALENCE,
-            "baseline_regex_only": baseline.as_dict(),
-            "full_stage_1": full.as_dict(),
+            "configurations": {n: c.as_dict() for n, (c, _) in results.items()},
             "by_difficulty": {k: confusion_for(v).as_dict() for k, v in by_difficulty.items()},
             "by_category": {k: confusion_for(v).as_dict() for k, v in by_category.items()},
             "latency_ms": {

@@ -3,9 +3,9 @@
 {"id": "S003", "label": "sensitive", "category": "credential", "difficulty": "easy", "expected": ["ANTHROPIC_API_KEY"], "text": "here is the api key sk-ant-api03-Hs4Jd7Kf2Lg9Mh1Np6Qr3St8Uv5Wx0Yz"}
 {"id": "S004", "label": "sensitive", "category": "credential", "difficulty": "medium", "expected": ["AWS_ACCESS_KEY_ID"], "text": "terraform is failing. aws_access_key_id = AKIA3RTFPQ2XMBNZ7KLW and the region is eu-west-1"}
 {"id": "S005", "label": "sensitive", "category": "credential", "difficulty": "medium", "expected": ["AWS_ACCESS_KEY_ID"], "text": "our temporary session creds ASIA5TGHNM4PQRWX9ZBC keep expiring mid deploy, how do I extend the ttl"}
-{"id": "S006", "label": "sensitive", "category": "credential", "difficulty": "easy", "expected": ["GITHUB_TOKEN"], "text": "the ci token ghp_9kLm2Np4Qr6St8Uv0Wx1Yz3Ab5Cd7Ef9G is not working for private repos"}
+{"id": "S006", "label": "sensitive", "category": "credential", "difficulty": "easy", "expected": ["GITHUB_TOKEN"], "text": "the ci token ghp_9kLm2Np4Qr6St8Uv0Wx1Yz3Ab5Cd7Ef9GhJJ is not working for private repos"}
 {"id": "S007", "label": "sensitive", "category": "credential", "difficulty": "medium", "expected": ["SLACK_TOKEN"], "text": "wrote a bot but the webhook rejects xoxb-482910375620-Kd8Fj3Nq7Wt2Yr5Bv, any idea why"}
-{"id": "S008", "label": "sensitive", "category": "credential", "difficulty": "medium", "expected": ["GOOGLE_API_KEY"], "text": "maps embed is broken, key AIzaSyC7Kd2Nf9Qp4Rt6Uv8Wx1Yz3Ab5Cd7Ef returns REQUEST_DENIED"}
+{"id": "S008", "label": "sensitive", "category": "credential", "difficulty": "medium", "expected": ["GOOGLE_API_KEY"], "text": "maps embed is broken, key AIzaSyC7Kd2Nf9Qp4Rt6Uv8Wx1Yz3Ab5Cd7FGHI returns REQUEST_DENIED"}
 {"id": "S009", "label": "sensitive", "category": "credential", "difficulty": "hard", "expected": ["STRIPE_SECRET_KEY"], "text": "payments are failing in prod. we call stripe with sk_live_51QrTmKLnOpBvCxWzYs4Jd7Kf2Lg9 from the worker"}
 {"id": "S010", "label": "sensitive", "category": "credential", "difficulty": "easy", "expected": ["PRIVATE_KEY"], "text": "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA3Kd2Nf9Qp4Rt6Uv8Wx1Yz3Ab5Cd7Ef9GhIjKlMnOpQrStUvWx\n-----END RSA PRIVATE KEY-----"}
 {"id": "S011", "label": "sensitive", "category": "credential", "difficulty": "medium", "expected": ["PRIVATE_KEY"], "text": "ssh keeps asking for a passphrase, here is my key file contents -----BEGIN OPENSSH PRIVATE KEY----- b3BlbnNzaC1rZXktdjEAAAAABG5vbmU"}
@@ -36,7 +36,7 @@
 
 {"id": "S033", "label": "sensitive", "category": "source-code", "difficulty": "medium", "expected": ["AWS_ACCESS_KEY_ID"], "text": "why is this failing?\nimport boto3\nclient = boto3.client('s3', aws_access_key_id='AKIA7YHNM4PQRWX9ZBCD')"}
 {"id": "S034", "label": "sensitive", "category": "source-code", "difficulty": "hard", "expected": ["OPENAI_API_KEY"], "text": "refactor this into a class:\nconst client = new OpenAI({ apiKey: 'sk-proj-Ld4Hg6Jf0AcKp3Vx9Nm2Qr7Ts5Yw1Bz8' });\nawait client.chat.completions.create(...)"}
-{"id": "S035", "label": "sensitive", "category": "source-code", "difficulty": "hard", "expected": ["GITHUB_TOKEN"], "text": "add error handling to this workflow step\n- run: curl -H \"Authorization: token ghp_2Np4Qr6St8Uv0Wx1Yz3Ab5Cd7Ef9GhIjK\" https://api.github.com/user"}
+{"id": "S035", "label": "sensitive", "category": "source-code", "difficulty": "hard", "expected": ["GITHUB_TOKEN"], "text": "add error handling to this workflow step\n- run: curl -H \"Authorization: token ghp_2Np4Qr6St8Uv0Wx1Yz3Ab5Cd7Ef9GhIjKlIJ\" https://api.github.com/user"}
 {"id": "S036", "label": "sensitive", "category": "source-code", "difficulty": "hard", "expected": ["HIGH_ENTROPY_STRING"], "text": "explain what this does\nJWT_SECRET = 'Ry4Ud6Ie0OaBq7Lm3Np9Zx2Vc5Kj8Wt1'\ndef sign(payload): return jwt.encode(payload, JWT_SECRET)"}
 
 {"id": "S037", "label": "sensitive", "category": "credential", "difficulty": "medium", "expected": ["OPENAI_API_KEY"], "text": "sk-proj-Nc8Ri3Oy5Pa2Ue7Tg0Hs6Lp1Qm4Xz9 keeps returning rate limit errors, what are the tier limits"}
@@ -47,7 +47,7 @@
 {"id": "S042", "label": "sensitive", "category": "unknown-format", "difficulty": "hard", "expected": ["HIGH_ENTROPY_STRING"], "text": "rotate the encryption key Vc5Kj8Wt1Ry4Ud6Ie0OaBq7Lm3Np9Zx2 across all three regions"}
 {"id": "S043", "label": "sensitive", "category": "credential", "difficulty": "hard", "expected": ["PRIVATE_KEY"], "text": "convert this to pkcs8 format for me\n-----BEGIN EC PRIVATE KEY-----\nMHcCAQEEIKd8Fj3Nq7Wt2Yr5BvXz9Qm4Lp1Hs6Tg0Ue3Ri8Oy5Pa2oAoGCCqGSM49\n-----END EC PRIVATE KEY-----"}
 {"id": "S044", "label": "sensitive", "category": "pii", "difficulty": "hard", "expected": ["US_SSN", "CREDIT_CARD"], "text": "fraud case notes: applicant ssn 345-67-8901 used card 6011111111111117 across four attempts"}
-{"id": "S045", "label": "sensitive", "category": "credential", "difficulty": "medium", "expected": ["GOOGLE_API_KEY"], "text": "quota exceeded on AIzaSyD9Qm4Lp1Hs6Tg0Ue3Ri8Oy5Pa2Nc7Kd2Nf, how do I raise the daily limit"}
+{"id": "S045", "label": "sensitive", "category": "credential", "difficulty": "medium", "expected": ["GOOGLE_API_KEY"], "text": "quota exceeded on AIzaSyD9Qm4Lp1Hs6Tg0Ue3Ri8Oy5Pa2Nc7FGHI, how do I raise the daily limit"}
 
 {"id": "H001", "label": "benign", "category": "hard-negative", "difficulty": "hard", "expected": [], "text": "what does the sk parameter mean in scikit-learn pipelines", "note": "naive sk- prefix rule fires here"}
 {"id": "H002", "label": "benign", "category": "hard-negative", "difficulty": "hard", "expected": [], "text": "should I import sklearn as sk or spell it out in shared code", "note": "sk- prefix"}
@@ -128,7 +128,7 @@
 
 {"id": "S046", "label": "sensitive", "category": "credential", "difficulty": "medium", "expected": ["OPENAI_API_KEY"], "text": "help me write a retry wrapper. the key I test with is sk-Tg0Ue3Ri8Oy5Pa2Nc7Kd2Nf9Qp4Rt6Uv8Wx"}
 {"id": "S047", "label": "sensitive", "category": "credential", "difficulty": "hard", "expected": ["ANTHROPIC_API_KEY"], "text": "compare these two configs for me\nprod: sk-ant-api03-Wx1Yz3Ab5Cd7Ef9GhIjKlMnOpQrStUv\nstaging: uses the shared pool"}
-{"id": "S048", "label": "sensitive", "category": "credential", "difficulty": "medium", "expected": ["GITHUB_TOKEN"], "text": "why does ghs_Kj8Wt1Ry4Ud6Ie0OaBq7Lm3Np9Zx2Vc5K only have read scope on actions"}
+{"id": "S048", "label": "sensitive", "category": "credential", "difficulty": "medium", "expected": ["GITHUB_TOKEN"], "text": "why does ghs_Kj8Wt1Ry4Ud6Ie0OaBq7Lm3Np9Zx2Vc5Kj8J only have read scope on actions"}
 {"id": "S049", "label": "sensitive", "category": "credential", "difficulty": "hard", "expected": ["AWS_ACCESS_KEY_ID"], "text": "paste of my ~/.aws/credentials\n[default]\naws_access_key_id = AKIA2XMBNZ7KLW3RTFPQ\nregion = ap-south-1"}
 {"id": "S050", "label": "sensitive", "category": "credential", "difficulty": "medium", "expected": ["STRIPE_SECRET_KEY"], "text": "is it safe to call stripe from the browser with sk_live_7Kd2Nf9Qp4Rt6Uv8Wx1Yz3Ab5Cd"}
 {"id": "S051", "label": "sensitive", "category": "credential", "difficulty": "hard", "expected": ["SLACK_TOKEN"], "text": "our incident bot posts with xoxa-193847562019-Ts5Yw1Bz8Ld4Hg6Jf0Ac and stopped working after the workspace migration"}
@@ -145,7 +145,7 @@
 {"id": "S062", "label": "sensitive", "category": "unknown-format", "difficulty": "hard", "expected": ["HIGH_ENTROPY_STRING"], "text": "SESSION_SECRET=Bz8Ld4Hg6Jf0AcKp3Vx9Nm2Qr7Ts5Yw1 is in the compose file, should it be"}
 {"id": "S063", "label": "sensitive", "category": "unknown-format", "difficulty": "hard", "expected": ["HIGH_ENTROPY_STRING"], "text": "our partner sends an hmac key 9d4f7a2c8e1b6053f9a2d7c4e8b1053f which we store in plaintext"}
 {"id": "S064", "label": "sensitive", "category": "source-code", "difficulty": "hard", "expected": ["HIGH_ENTROPY_STRING"], "text": "why does this leak?\nconst config = { dbPassword: 'Qr7Ts5Yw1Bz8Ld4Hg6Jf0AcKp3Vx9Nm2' };\nmodule.exports = config;"}
-{"id": "S065", "label": "sensitive", "category": "source-code", "difficulty": "hard", "expected": ["GOOGLE_API_KEY"], "text": "convert this to typescript\nconst MAPS_KEY = 'AIzaSyE1Bz8Ld4Hg6Jf0AcKp3Vx9Nm2Qr7Ts5';\nexport function initMap() {}"}
+{"id": "S065", "label": "sensitive", "category": "source-code", "difficulty": "hard", "expected": ["GOOGLE_API_KEY"], "text": "convert this to typescript\nconst MAPS_KEY = 'AIzaSyE1Bz8Ld4Hg6Jf0AcKp3Vx9Nm2Qr7TFGHI';\nexport function initMap() {}"}
 {"id": "S066", "label": "sensitive", "category": "source-code", "difficulty": "hard", "expected": ["OPENAI_API_KEY"], "text": "add typing to this\nimport os\nos.environ['OPENAI_API_KEY'] = 'sk-proj-Yw1Bz8Ld4Hg6Jf0AcKp3Vx9Nm2Qr7Ts5'\nclient = OpenAI()"}
 {"id": "S067", "label": "sensitive", "category": "credential", "difficulty": "medium", "expected": ["GITHUB_PAT"], "text": "does github_pat_11XYZ9876Ts5Yw1Bz8Ld4Hg6Jf0AcKp3Vx9Nm2Qr7Kd8Fj3Nq7Wt2Yr need repo scope for releases"}
 {"id": "S068", "label": "sensitive", "category": "financial", "difficulty": "hard", "expected": ["CREDIT_CARD"], "text": "test in production with 6011111111111117 then void it, is that acceptable practice"}

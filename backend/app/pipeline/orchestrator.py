@@ -23,7 +23,7 @@ import time
 import uuid
 from dataclasses import dataclass
 
-from ..detectors import entropy_detector, regex_detector
+from ..detectors import entropy_detector, regex_detector, semantic_detector
 from ..detectors.base import Finding, highest_severity, resolve_overlaps
 from ..schemas.analyze import (
     Action,
@@ -67,7 +67,12 @@ class StageResult:
     stages_run: list[str]
 
 
-def run_stages(text: str, *, use_entropy: bool = True) -> StageResult:
+def run_stages(
+    text: str,
+    *,
+    use_entropy: bool = True,
+    use_semantic: bool = True,
+) -> StageResult:
     """Run the detection stages and fuse them into a verdict.
 
     Extracted from `analyze()` so the API route and the evaluation
@@ -75,14 +80,15 @@ def run_stages(text: str, *, use_entropy: bool = True) -> StageResult:
     reimplements the stage logic measures something that never runs in
     production, and the two drift apart without either failing.
 
-    `use_entropy` exists for the harness, which needs a regex-only
-    baseline to compare against. The report's central claim is a
-    DIFFERENCE between configurations, so producing those
+    The `use_*` switches exist for the harness, which needs to compare
+    configurations: regex only, Stage 1, Stage 1 + 2. The report's
+    central claim is a DIFFERENCE between them, so producing those
     configurations has to be a first-class capability rather than a
-    commented-out line someone toggles by hand.
+    line someone comments out by hand.
 
     :param text: content to inspect
-    :param use_entropy: run Stage 1b as well as 1a
+    :param use_entropy: run Stage 1b (entropy)
+    :param use_semantic: run Stage 2 (Presidio NER)
     """
     stages_run: list[str] = ["regex"]
 
@@ -109,6 +115,17 @@ def run_stages(text: str, *, use_entropy: bool = True) -> StageResult:
         stages_run.append("entropy")
         findings = resolve_overlaps(findings + entropy_detector.scan(text))
 
+    if use_semantic and not critical_already:
+        # ---- Stage 2: semantic entities --------------------------
+        # PERSON, ORGANIZATION, LOCATION — categories no pattern can
+        # reach, because the answer depends on surrounding words
+        # rather than the shape of the token.
+        #
+        # ~200x the cost of Stage 1 (2.8ms vs 0.014ms), which is why
+        # it sits behind the same short-circuit.
+        stages_run.append("semantic")
+        findings = _merge_semantic(findings, semantic_detector.scan(text))
+
     action, level, score = _SEVERITY_VERDICT.get(
         highest_severity(findings), _NOTHING_FOUND
     )
@@ -120,6 +137,39 @@ def run_stages(text: str, *, use_entropy: bool = True) -> StageResult:
         findings=findings,
         stages_run=stages_run,
     )
+
+
+def _merge_semantic(stage1: list[Finding], semantic: list[Finding]) -> list[Finding]:
+    """Add Stage 2 findings without letting them displace Stage 1 ones.
+
+    NOT `resolve_overlaps(stage1 + semantic)`, and the difference cost
+    five false negatives before it was caught.
+
+    `resolve_overlaps` ranks by confidence, which is correct when two
+    detectors make COMPETING CLAIMS about what the same characters are
+    — an Aadhaar number or a payment card, but not both. Confidence is
+    the right arbiter there because the question is about truth.
+
+    Stage 2 is not making a competing claim. spaCy labels
+    `Kp3Vx9Nm2Qr7Ts5Yw1Bz8Ld4Hg6Jf0Ac` as a PERSON at 0.85 confidence
+    because a random token in that sentence position looks like a name
+    to it. That 0.85 is not comparable to our 0.85 for "this looks
+    random" — the two numbers answer different questions — and letting
+    the semantic label win meant a `low`-severity guess suppressed a
+    `medium`-severity secret and the message was allowed through.
+
+    The principle: **Stage 1 is authoritative on the spans it has
+    already classified.** Semantic findings are additive context, and
+    survive only where Stage 1 claimed nothing. If our detectors
+    already know what a span is, spaCy's opinion about it is noise.
+
+    :param stage1: findings from regex and entropy, already resolved
+    :param semantic: findings from Presidio
+    """
+    kept = list(stage1)
+    kept.extend(f for f in semantic if not any(f.overlaps(existing) for existing in stage1))
+
+    return sorted(kept, key=lambda f: f.start)
 
 
 def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
