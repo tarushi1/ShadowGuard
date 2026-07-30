@@ -344,9 +344,53 @@ spaCy to confirm something already certain. `stages_run` in the response records
 executed, making this **visible evidence** rather than a claim.
 
 ### Named Entity Recognition (NER)
-Identifying real-world entities — people, organisations, locations — in text. Understands
-*context* rather than pattern: "Sarah Chen" is a person because of how it is used, not because it
-matches a regex. This is the Stage 2 capability that regex-only DLP fundamentally lacks.
+A statistical model that labels spans by what they *refer to* — `PERSON`, `ORGANIZATION`,
+`LOCATION` — using **surrounding words** rather than the shape of the token:
+
+```
+"Sarah Chen approved the refund"      → Sarah Chen   = PERSON
+"Chen Dynasty pottery is on display"  → Chen Dynasty = ORG
+```
+
+Same token, different label. No regex can do that — not because the pattern is hard, but because
+the answer is not in the pattern at all. This is what regex-only DLP structurally lacks.
+
+### Microsoft Presidio
+An open-source PII framework that wraps an NLP engine (spaCy here) and adds ~30 recognizers,
+context-aware confidence adjustment, and consistent scoring. Runs fully local.
+
+| Option | Verdict |
+|---|---|
+| spaCy alone | ✅ the engine, but you build scoring and PII recognizers yourself |
+| **Presidio** | ✅ **chosen** — recognizers, context enhancer and confidence scores, local |
+| Transformer NER | ⚠️ better accuracy, 100–500 ms — 10,000× our Stage 1 |
+| Cloud PII APIs | ❌ self-defeating: a DLP tool that ships prompts to a third party *is* the leak |
+
+**Two things measurement changed:**
+
+- **The entity allowlist is a 10× speed-up**, not just a correctness rule. All ~30 recognizers
+  cost 30–230 ms; restricting to four types gives mean 2.8 ms. Narrow scope turned out to be a
+  performance decision as much as a double-counting one.
+- **`en_core_web_md`, not `lg`.** They differ mainly in *word vectors*, not the NER component —
+  published F-scores 0.84 / 0.85 / 0.85. `md` gives lg-equivalent recognition at 40 MB vs 560 MB.
+
+⚠️ A bare `AnalyzerEngine()` silently downloads `en_core_web_lg` (400 MB) on first use, which
+presents as an inexplicable multi-minute hang. Always configure `NlpEngineProvider` explicitly.
+
+### Competing claims vs additive context
+The distinction that decides how two detectors' overlapping findings are merged.
+
+**Competing claims** — two detectors disagree about what the same characters *are* (an Aadhaar
+number *or* a payment card, not both). Confidence is the right arbiter, because the question is
+about truth. → [D16](decisions.md)
+
+**Additive context** — a semantic label and a secret classification are *not* rivals. spaCy
+labelling a random token as `PERSON` at 0.85 is simply wrong; our detector already knows what that
+span is. Here the rule is precedence, not arbitration: **Stage 1 is authoritative on spans it has
+already classified.** → [D26](decisions.md)
+
+Getting this backwards cost five false negatives — a `low`-severity semantic guess displaced a
+`medium`-severity secret and the message was allowed through.
 
 ### OCR (Optical Character Recognition)
 Extracting text from images. The Stage 3 capability that lets ShadowGuard read a screenshot

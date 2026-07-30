@@ -30,14 +30,14 @@ It computes a risk score and decides whether to **allow**, **warn**, **redact**,
 
 | | |
 |---|---|
-| **Last updated** | 2026-07-29 |
+| **Last updated** | 2026-07-30 |
 | **Project root** | `/Users/arushitiwari/Desktop/ShadowGuard` |
-| **Git branch** | `main` (36 commits, working tree clean) |
-| **Current stage** | Stages 0 and 1 complete and measured. Starting Stage 2. |
-| **Completed** | **Weeks 1–3 complete** (1.1–1.5, 2.1–2.5, 3.1–3.7). 2.6 deferred to Week 6. |
-| **Next task** | **Week 4 — Stage 2 semantic analysis (Presidio + spaCy)** |
+| **Git branch** | `main` (38 commits, working tree clean) |
+| **Current stage** | Stages 0, 1 and 2 running end to end. Week 4 in progress. |
+| **Completed** | **Weeks 1–3 complete**; Week 4 Presidio integration done. 2.6 deferred to Week 6. |
+| **Next task** | **4.2 — context requirements, to clear the last two false positives** |
 | **Deadline** | ~2026-09-20 (8 weeks from 2026-07-26) |
-| **Weeks elapsed** | ~0.5 of 8 — **well ahead of plan** (3 of 8 weeks' work done) |
+| **Weeks elapsed** | ~0.6 of 8 — **well ahead of plan** |
 
 ### What actually runs today
 
@@ -115,17 +115,25 @@ console filter is set to **Verbose**.
 ### Measured results — Stage 1, 150-sample corpus
 
 ```
-                    regex only    + entropy     change
-  recall               74.7%        100.0%      +25.3%  ✓
-  false-positive        2.7%          2.7%           =
-  precision            96.6%         97.4%       +0.9%  ✓
-  F1                   84.2%         98.7%      +14.5%  ✓
-
-  precision @ 1% real-world prevalence            27.5%
-  latency   mean 0.014 ms   p50 0.013 ms   p95 0.022 ms
+  metric                regex only       stage 1   stage 1 + 2
+  recall                    82.7%        100.0%        100.0%
+  false-positive             2.7%          2.7%          2.7%
+  precision                 96.9%         97.4%         97.4%
+  precision @ 1%            23.8%         27.5%         27.5%
+  F1                        89.2%         98.7%         98.7%
+  latency p95             0.017ms       0.024ms       3.319ms
 ```
 
-**Entropy buys 25 points of recall at no false-positive cost.** Reproduce with:
+**Entropy buys 17 points of recall at no false-positive cost.**
+
+**Stage 2 currently changes no metric**, and that is reported rather than hidden. Two reasons,
+both fixable and both scheduled: the corpus under-covers person/organisation PII (a documented
+gap), and semantic findings carry `low` severity pending the Week 5 risk engine that can express
+*"a name plus an account number plus an email is a customer record"*. What Stage 2 does buy today
+is capability — `PERSON`, `ORGANIZATION`, `LOCATION` — at a 200× latency cost that is still
+invisible to a user.
+
+Reproduce with:
 
 ```bash
 python -m evaluation.run_eval --failures

@@ -160,7 +160,7 @@ curl -s -X POST http://127.0.0.1:8000/api/v1/analyze \
 ### Automated
 
 ```bash
-pytest -q                                    # expect: 125 passed
+pytest -q                                    # expect: 127 passed
 python -m evaluation.corpus                  # summarise the labelled corpus
 python -m evaluation.run_eval                # precision / recall / FPR / latency
 python -m evaluation.run_eval --failures     # every misclassified sample, by id

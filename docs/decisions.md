@@ -362,6 +362,62 @@ pattern can express that, so faking a fix would be corpus memorisation. They are
 
 ---
 
+## D26 — Stage 2 findings are additive context, not competing claims
+**Date:** 2026-07-30 · **Status:** locked
+
+Merging Stage 2 with `resolve_overlaps(stage1 + semantic)` **dropped recall from 100% to 93.3%**.
+spaCy labels random tokens as `PERSON` at 0.85, and confidence-first ranking let that
+`low`-severity guess displace the `medium`-severity entropy finding on the same span — five
+messages containing secrets were allowed through.
+
+Flipping back to severity-first was not available: [D16](#d16--overlap-resolution-ranks-confidence-before-severity)
+exists because that gives the wrong answer for Aadhaar-vs-card.
+
+**The cases differ in kind:**
+
+| | Nature | Arbiter |
+|---|---|---|
+| Aadhaar vs credit card | competing claims about what the characters **are** | confidence |
+| PERSON vs high-entropy secret | not competing — spaCy mislabelled a random token | **precedence** |
+
+**Chosen:** Stage 1 is authoritative on spans it has already classified. Semantic findings survive
+only where Stage 1 claimed nothing. Two regression tests pin both halves — that secrets are not
+suppressed, and that semantic findings still appear on unclaimed spans.
+
+---
+
+## D27 — Semantic findings carry `low` severity
+**Date:** 2026-07-30 · **Status:** active
+
+A person's name is not a secret. People discuss colleagues, authors and public figures constantly.
+What makes a name sensitive is **combination**: a name plus an account number plus an email is a
+customer record.
+
+**Chosen:** `low` severity, so Stage 2 cannot change a verdict on its own.
+
+**Consequence, reported rather than hidden:** Stage 2 currently moves no metric. Expressing
+"three weak signals together are serious" is the Week 5 risk engine's job; encoding it inside a
+detector would put fusion logic where the evaluation harness cannot vary it and the report cannot
+compare alternatives.
+
+---
+
+## D28 — Presidio restricted to an entity allowlist
+**Date:** 2026-07-30 · **Status:** active
+
+Presidio ships ~30 recognizers, many duplicating ours (`EMAIL_ADDRESS`, `CREDIT_CARD`, `US_SSN`,
+`IBAN_CODE`).
+
+**Chosen:** allowlist `PERSON`, `ORGANIZATION`, `LOCATION`, `NRP` — only what Stage 1 structurally
+cannot reach. Avoiding double-counting **by construction** rather than by cleanup, so a future
+Presidio release adding a recognizer cannot silently start colliding with ours.
+
+**Unanticipated benefit:** it is a **10× speed-up**. All recognizers cost 30–230 ms per message;
+four cost 2.8 ms. Narrow scope was a performance decision as much as a correctness one, which was
+not apparent until measured.
+
+---
+
 ## Still open
 
 | Question | Decide by |
