@@ -23,6 +23,7 @@ It computes a risk score and decides whether to **allow**, **warn**, **redact**,
 | [docs/security.md](docs/security.md) | Threat model, known bypasses, privacy, ethics, limitations |
 | [docs/testing.md](docs/testing.md) | How to verify every component and debug by symptom |
 | [evaluation/README.md](evaluation/README.md) | The corpus, its methodology, and the threats to validity — **report material** |
+| [evaluation/corpus-spec-v2.md](evaluation/corpus-spec-v2.md) | The corpus extension, **pre-registered** with six predictions, then graded — three were wrong |
 
 ---
 
@@ -32,10 +33,10 @@ It computes a risk score and decides whether to **allow**, **warn**, **redact**,
 |---|---|
 | **Last updated** | 2026-08-01 |
 | **Project root** | `/Users/arushitiwari/Desktop/ShadowGuard` |
-| **Git branch** | `main` (40 commits, working tree clean) |
-| **Current stage** | Stages 0, 1 and 2 running end to end. Week 4 in progress. |
-| **Completed** | **Weeks 1–3 complete**; 4.1 Presidio, 4.2 context requirements. 2.6 deferred to Week 6. |
-| **Next task** | **4.3 — extend the corpus; it is saturated (0 failures, see D30)** |
+| **Git branch** | `main` (45 commits, working tree clean) |
+| **Current stage** | Stages 0, 1 and 2 running end to end, evaluated at action **and** entity level. |
+| **Completed** | **Weeks 1–4 complete**. 2.6 deferred to Week 6. |
+| **Next task** | **Week 5 — risk engine; 11 points of recall are waiting on it ([D32](docs/decisions.md))** |
 | **Deadline** | ~2026-09-20 (8 weeks from 2026-07-26) |
 | **Weeks elapsed** | ~0.6 of 8 — **well ahead of plan** |
 
