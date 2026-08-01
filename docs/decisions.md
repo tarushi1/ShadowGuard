@@ -418,6 +418,104 @@ not apparent until measured.
 
 ---
 
+## D29 — Weak rules are gated on nearby context words
+
+**Context.** Two hard negatives survived every earlier fix:
+
+```
+H016  employee badge numbers run from 100000000000 to 999999999999   → INDIA_AADHAAR
+H017  our sku format is ABCDE1234F which collides with the validator → INDIA_PAN
+```
+
+Neither is fixable by pattern, checksum or entropy, and the reason is structural. Every *strong*
+rule in `regex_detector.py` draws its confidence from something beyond shape — a vendor prefix
+(`ghp_`), a checksum (Luhn), a unique header (`-----BEGIN`). These two have nothing beyond shape.
+Twelve digits is also a badge number, an order id, a phone range; five letters and four digits is
+also an SKU or a part number.
+
+The corpus contains the demonstration directly:
+
+```
+S024  the vendor submitted PAN ABCDE1234F for gst registration      → sensitive
+H017  our sku format is ABCDE1234F which collides with the validator → benign
+```
+
+The **same ten characters**. The difference is whether the number is being **used** or
+**discussed** — and that evidence is not in the token.
+
+**Options considered:**
+
+| Approach | Effect |
+|---|---|
+| Required context (gate) | Match dropped unless a supporting word is nearby |
+| Score adjustment (Presidio's "context enhancers") | Finding kept, confidence lowered |
+| Deny-phrases — suppress on "format is", "example", "run from" | Blacklist |
+| ML context classifier | Needs labelled context data we do not have |
+
+**Chosen:** the **gate**, on `INDIA_AADHAAR` and `INDIA_PAN` only, with a ±50-character window.
+
+Score adjustment is the more elegant answer and is the wrong one *this week*: the verdict is
+currently derived from **severity**, so a lower confidence would change nothing. A score reduction
+that nothing reads is not a fix. Week 5's risk engine can soften the gate into a weight once
+something exists that can read a weight.
+
+Deny-phrases were rejected as a blacklist — endless, and every phrase not thought of is a false
+positive. The gate is an allowlist, so the failure mode is a **miss**, which is at least visible in
+recall.
+
+**Design details that carry weight:**
+
+- **±50 characters, not "anywhere in the message."** Unbounded matching would let `aadhaar` in the
+  first paragraph validate a twelve-digit build number in the ninth.
+- **`\b` around every context word.** Without it `pan` matches inside `company`, `expand`, `Japan`
+  and `panel`, and the gate silently stops doing anything — the worst failure mode, because every
+  other test still passes.
+- **The match itself is excluded from the searched window.** A security property: include it and a
+  PAN beginning with the letters `PAN` validates itself. A gate the sender can satisfy by choosing
+  a convenient value is not a gate.
+- **Context words were written from the domain, not from the corpus** — `uidai`, `ekyc`,
+  `enrolment`, `assessee`, `gstin` are in the lists and no corpus sample needs them. That breadth
+  is the evidence against overfitting, per [D25](#d25--fixing-detector-bugs-from-corpus-failures-without-overfitting).
+
+**Consequence.** Both false positives cleared; false-positive rate 2.7% → 0%. **This trades recall
+for precision** and the cost is real: `my number is 2345 6789 0123` is now missed. Accepted for
+rules this weak, and stated in the report's limitations rather than omitted.
+
+---
+
+## D30 — The 150-sample corpus is saturated, and that is reported as a limitation
+
+**Context.** After D29 the pipeline scores 100% recall, 0% false-positive rate, 100% precision,
+F1 100%, with zero misclassified samples.
+
+The temptation is to present that as the result. It is not one.
+
+**The reasoning.** A perfect score on 150 samples written by the author measures the corpus, not
+the detector. The Wilson interval already says so: 0 false positives in 75 benign samples places
+the true rate in **[0%, 4.9%]**. Prevalence-corrected precision reads 100% at 0% FPR and **17%** at
+4.9% — an enormous swing produced by a difference the corpus cannot resolve.
+
+**Chosen:** report the saturation explicitly, in the README and in the report, and treat it as the
+justification for Task 4.3 rather than as a footnote.
+
+**Consequences, both uncomfortable and both stated:**
+
+- **Stage 2's contribution is unmeasurable on this corpus.** It moves no metric because no headroom
+  remains. It is retained for *capability* — `PERSON`/`ORGANIZATION`/`LOCATION` — not for a number.
+- **"Stage 2 reduces false positives" is not demonstrated and is not claimed.** The regex-only
+  baseline also sits at 100% precision here.
+
+**Rejected:** trimming the corpus, or reporting only the balanced-precision figure. Both would
+produce a better-looking table by removing the evidence that the table is unreliable.
+
+**Note on ordering.** Task 4.3 extends the corpus *after* these results are known, which is exactly
+the shape of cherry-picking. The defence has to be structural, not a promise: new samples are
+written to a stated specification (categories and counts fixed in advance), the pre-extension
+numbers above are kept verbatim, and both are reported side by side. If the extended corpus scores
+worse, that is the finding.
+
+---
+
 ## Still open
 
 | Question | Decide by |

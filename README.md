@@ -30,12 +30,12 @@ It computes a risk score and decides whether to **allow**, **warn**, **redact**,
 
 | | |
 |---|---|
-| **Last updated** | 2026-07-30 |
+| **Last updated** | 2026-08-01 |
 | **Project root** | `/Users/arushitiwari/Desktop/ShadowGuard` |
-| **Git branch** | `main` (38 commits, working tree clean) |
+| **Git branch** | `main` (41 commits, working tree clean) |
 | **Current stage** | Stages 0, 1 and 2 running end to end. Week 4 in progress. |
-| **Completed** | **Weeks 1–3 complete**; Week 4 Presidio integration done. 2.6 deferred to Week 6. |
-| **Next task** | **4.2 — context requirements, to clear the last two false positives** |
+| **Completed** | **Weeks 1–3 complete**; 4.1 Presidio, 4.2 context requirements. 2.6 deferred to Week 6. |
+| **Next task** | **4.3 — extend the corpus; it is saturated (0 failures, see D30)** |
 | **Deadline** | ~2026-09-20 (8 weeks from 2026-07-26) |
 | **Weeks elapsed** | ~0.6 of 8 — **well ahead of plan** |
 
@@ -117,21 +117,52 @@ console filter is set to **Verbose**.
 ```
   metric                regex only       stage 1   stage 1 + 2
   recall                    82.7%        100.0%        100.0%
-  false-positive             2.7%          2.7%          2.7%
-  precision                 96.9%         97.4%         97.4%
-  precision @ 1%            23.8%         27.5%         27.5%
-  F1                        89.2%         98.7%         98.7%
-  latency p95             0.017ms       0.024ms       3.319ms
+  false-positive             0.0%          0.0%          0.0%
+  precision                100.0%        100.0%        100.0%
+  precision @ 1%           100.0%        100.0%        100.0%
+  F1                        90.5%        100.0%        100.0%
+  latency p95             0.018ms       0.019ms       3.490ms
 ```
 
-**Entropy buys 17 points of recall at no false-positive cost.**
+**Entropy buys 17 points of recall at no false-positive cost.** That is the one clean,
+well-supported claim in this table.
 
-**Stage 2 currently changes no metric**, and that is reported rather than hidden. Two reasons,
-both fixable and both scheduled: the corpus under-covers person/organisation PII (a documented
-gap), and semantic findings carry `low` severity pending the Week 5 risk engine that can express
-*"a name plus an account number plus an email is a customer record"*. What Stage 2 does buy today
-is capability — `PERSON`, `ORGANIZATION`, `LOCATION` — at a 200× latency cost that is still
-invisible to a user.
+#### Read the 100% as a warning, not a result
+
+**This corpus is saturated: every detector improvement now has nothing left to measure.**
+A perfect score on 150 samples the author wrote is a statement about the corpus, not about the
+detector. The Wilson interval says so out loud — 0 false positives in 75 benign samples means the
+true rate lies somewhere in **[0%, 4.9%]**, not at zero. The corpus cannot resolve anything finer
+than about one in twenty.
+
+Two consequences that the report must carry rather than bury:
+
+- **Stage 2's value is currently unmeasurable here.** It changes no metric, because there is no
+  headroom left in which to change one. What it buys is *capability* — `PERSON`, `ORGANIZATION`,
+  `LOCATION`, categories Stage 1 structurally cannot reach — at a 200× latency cost that is still
+  invisible to a user. Task 4.3 extends the corpus so that capability becomes measurable.
+- **The regex-only baseline is now also at 100% precision**, so "Stage 2 reduces false positives"
+  is *not* demonstrated by this run and is not claimed.
+
+#### Context requirements (4.2)
+
+The two remaining false positives were cleared by gating the two weakest rules — `INDIA_AADHAAR`
+and `INDIA_PAN` — on a supporting word appearing within 50 characters. See
+[D29](docs/decisions.md).
+
+The clearest illustration this project has produced, and it came out of the corpus rather than
+being constructed:
+
+| Text | Verdict |
+|---|---|
+| `the vendor submitted PAN ABCDE1234F for gst registration` | **sensitive** |
+| `our sku format is ABCDE1234F which collides with the validator` | **benign** |
+
+The same ten characters. The difference is whether the number is being **used** or **discussed**,
+and that evidence is not in the token at all.
+
+This trades recall for precision, and the cost is real: `my number is 2345 6789 0123` carries no
+supporting word and is now missed. Accepted for rules this weak; recorded as a limitation.
 
 Reproduce with:
 
@@ -139,21 +170,13 @@ Reproduce with:
 python -m evaluation.run_eval --failures
 ```
 
-Two false positives remain, both deliberate:
-
-| | |
-|---|---|
-| `employee badge numbers run from 100000000000 to 999999999999` | flagged as Aadhaar |
-| `our sku format is ABCDE1234F which collides with the validator` | flagged as PAN |
-
-Both require understanding that a number is being **discussed** rather than **used**. No pattern
-or entropy measure can make that distinction — it is exactly what Stage 2 is for, and they are the
-concrete target for Week 4.
-
-> **On the 27.5%:** precision measured on a balanced corpus overstates real precision, because real
-> traffic is perhaps 1% sensitive. Both figures are reported. See
+> **On base rates:** precision measured on a balanced corpus overstates real precision, because
+> real traffic is perhaps 1% sensitive. Both figures are reported. See
 > [evaluation/README.md](evaluation/README.md) — this is the base-rate fallacy, and it is the most
-> common way security-tool evaluations mislead.
+> common way security-tool evaluations mislead. It reads 100% here only because the measured
+> false-positive rate is zero; at the interval's upper bound of 4.9% it would fall to about 17%.
+> That gap between 100% and 17%, produced by a difference well inside the corpus's resolution, is
+> the single best argument for Task 4.3.
 
 ---
 
@@ -472,9 +495,22 @@ Every task is independently testable — you know it works before moving on.
 | 3.7 Evaluation harness (precision / recall / FPR) | A printed metrics table | ✅ see results below |
 
 ### Week 4 — Stage 2: semantic analysis
-Presidio setup · spaCy model · custom recognizers · context words · confidence scores · merging
-Stage 1 + 2 results without double-counting · re-run the harness and show the false-positive drop
-vs. Week 3. **That delta is the single most important number in the report.**
+
+| Task | Test | Status |
+|---|---|---|
+| 4.1 Presidio + spaCy, allowlisted entities, merged without double-counting | Semantic labels appear; no secret is suppressed by one | ✅ |
+| 4.2 Context requirements for the two weakest rules | Same token flagged when used, ignored when discussed | ✅ |
+| 4.3 Extend the corpus with person/organisation PII | Stage 2's contribution becomes measurable | ⬜ **next** |
+
+> **The plan changed, and the reason is worth recording.** Week 4 was written to end with "the
+> false-positive drop vs. Week 3 — the single most important number in the report." That number
+> does not exist, because 4.2 took the false-positive rate to **zero on regex alone**. Stage 2 has
+> no false positives left to remove.
+>
+> This is a corpus limitation, not a Stage 2 failure, and 4.3 is the honest response: extend the
+> corpus to cover the PII categories only Stage 2 can reach, and report the pre- and
+> post-extension numbers side by side. See **[D30](docs/decisions.md)** for why the extension is
+> specified in advance rather than tuned to the outcome.
 
 ### Week 5 — Stage 5 + persistence
 Risk engine (weighted fusion, tunable config file) · thresholds → allow/warn/redact/block ·

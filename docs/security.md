@@ -33,6 +33,36 @@ Tracked deliberately. Each is either fixed, scheduled, or accepted with reasonin
 | B5 | **Host page hostility.** ChatGPT could find and delete our modal's host element. `closed` shadow root stops it reaching *into* our UI but not removing it. | Inherent — a content script is a guest |
 | B6 | **Client-supplied `user_id`.** Anyone can send any id, so behavioural profiles can be poisoned or evaded. | Prototype limitation; real deployment uses authenticated identity |
 | B7 | **Uninstalling the extension.** | Enterprise deployments use forced-install policy; out of scope here |
+| B8 | **Context starvation.** `INDIA_AADHAAR` and `INDIA_PAN` only fire when a supporting word appears within 50 characters ([D29](decisions.md)), so pasting the bare number with no surrounding words evades both. | **Accepted, and it is the price of the gate** — see below |
+
+### On B8 — a bypass that was bought deliberately
+
+B8 did not appear by accident; it was **created** by the fix in D29, and it is worth being precise
+about the trade rather than presenting the fix as free.
+
+Before the gate, those two rules fired on any twelve digits and on any five-letters-four-digits
+token. That caught the bare-number case — and also caught badge numbers, order ids, phone ranges,
+SKUs and part numbers. **A rule that fires on everything catches the leak and is switched off by
+its users within a week**, which protects nothing at all. False positives are not merely annoying;
+they are how a control loses the authority to stop anything.
+
+So the trade is: give up the bare-number case, keep a rule people will still listen to.
+
+Two properties make it defensible:
+
+- **It is not an evasion an ordinary user stumbles into.** A person disclosing their own Aadhaar in
+  a real question ("kyc document shows aadhaar …") writes the word. Reaching B8 means stripping
+  the surrounding language on purpose — and B4 already concedes that a determined insider has far
+  easier routes than that.
+- **The failure is a miss, not a wrong answer.** The gate is an allowlist, so what it costs shows
+  up in *recall*, which is measured and reported. A deny-phrase list would have hidden the same
+  cost inside precision, where nothing would have shown it.
+
+**Not closed by:** widening the window, which weakens the gate proportionally, or adding more
+context words, which does nothing for text that has no words at all. The real closure is Week 5's
+risk engine treating a bare unexplained identifier as a *weak* signal that can combine with others,
+rather than the binary this stage can express — and, for Aadhaar specifically, the Verhoeff
+checksum, which would supply the evidence the pattern lacks and make the gate unnecessary.
 
 ---
 
