@@ -32,7 +32,7 @@ It computes a risk score and decides whether to **allow**, **warn**, **redact**,
 |---|---|
 | **Last updated** | 2026-08-01 |
 | **Project root** | `/Users/arushitiwari/Desktop/ShadowGuard` |
-| **Git branch** | `main` (41 commits, working tree clean) |
+| **Git branch** | `main` (40 commits, working tree clean) |
 | **Current stage** | Stages 0, 1 and 2 running end to end. Week 4 in progress. |
 | **Completed** | **Weeks 1–3 complete**; 4.1 Presidio, 4.2 context requirements. 2.6 deferred to Week 6. |
 | **Next task** | **4.3 — extend the corpus; it is saturated (0 failures, see D30)** |
