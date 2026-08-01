@@ -81,10 +81,29 @@ def test_difficulty_is_recorded_so_metrics_can_be_split():
 
 
 def test_labels_and_expected_entities_never_contradict():
-    """An unsure label silently corrupts every metric computed from it."""
+    """An unsure label silently corrupts every metric computed from it.
+
+    The benign half of this rule changed in v2. It used to demand
+    `expected == ()`, which conflated "found nothing" with "did
+    nothing" — and made every semantic entity unlabellable, since all
+    of them are low severity and therefore appear only in benign
+    samples. It was also already producing a small lie: H035 contains
+    an email address and claimed to contain nothing.
+
+    A benign sample may now record the low-severity entities it
+    genuinely holds. What it may not do is claim something that would
+    have stopped the message, which is the guarantee the old rule was
+    really providing.
+    """
+    from backend.app.detectors.catalog import is_blocking, severity_of
+
     for sample in load():
         if sample.label == "benign":
-            assert sample.expected == (), f"{sample.id}: benign but expects entities"
+            for entity_type in sample.expected:
+                assert not is_blocking(entity_type), (
+                    f"{sample.id}: benign but expects {entity_type} "
+                    f"({severity_of(entity_type)} severity)"
+                )
         else:
             assert sample.expected, f"{sample.id}: sensitive but expects nothing"
 

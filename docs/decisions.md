@@ -516,7 +516,85 @@ worse, that is the finding.
 
 ---
 
-## Still open
+## D31 — Evaluation is split into action level and entity level
+
+**Context.** [D30](#d30--the-150-sample-corpus-is-saturated-and-that-is-reported-as-a-limitation)
+concluded the corpus needed extending so Stage 2's contribution could be measured. Writing the
+specification for that extension surfaced a problem that no number of samples could have fixed.
+
+The chain is short and every link was already in this document:
+
+| | |
+|---|---|
+| [D21](#d21--corpus-labels-the-action-not-the-entity) | the corpus labels the **action** |
+| [D27](#d27--semantic-findings-carry-low-severity) | semantic findings are `low`, so the action is `allow` |
+| ∴ | Stage 2 **cannot change an action** under the current policy |
+| ∴ | no quantity of new samples makes Stage 2 appear in an action-level metric |
+
+Confirmation from the other side: `metrics.py` never read `Sample.expected`. Every number the
+harness printed came from `is_sensitive` vs `predicted_sensitive`. **Entity-level evaluation did
+not exist**, and the field that would drive it had been loaded and ignored since Week 3.
+
+**Chosen:** two evaluation levels, reported separately and never conflated.
+
+| | Question | What it grades |
+|---|---|---|
+| **Action level** | should this message have been stopped? | the product's behaviour, including severity policy |
+| **Entity level** | did we find what is actually in it? | detection quality alone |
+
+**Consequences.**
+
+- Stage 2 became measurable immediately: `PERSON` 79.3% recall / 69.7% precision, `ORGANIZATION`
+  85.7% / 51.4%, `LOCATION` 42.9% / 37.5%.
+- Two defects appeared that action-level metrics had hidden on the *existing* corpus:
+  `HIGH_ENTROPY_STRING` recall was 86.7%, not 100%, and `EMAIL` precision 84.6%. Both messages had
+  been judged correctly, so nothing was visible.
+- The loader rule "benign ⇒ `expected` is empty" had to go — it conflated *found nothing* with
+  *did nothing*, and made every semantic entity unlabellable, since all of them are low severity
+  and therefore live entirely inside benign samples. Replaced by **"benign ⇒ no entity of blocking
+  severity"**, checked against a registry assembled from the detectors themselves
+  (`detectors/catalog.py`) rather than a hand-copied table.
+- Types the corpus never labels print `-` rather than 0% precision. Reading 12 `ORGANIZATION`
+  claims against silent ground truth as 12 errors would **invent bad news**, which on a security
+  tool is the more persuasive failure and the easier one to miss.
+
+---
+
+## D32 — The corpus extension was pre-registered, and three predictions were wrong
+
+**Context.** Extending a corpus after seeing results is the shape of cherry-picking: you already
+know which way anything you add will move the numbers.
+
+**Chosen:** borrow **pre-registration** from experimental science. Categories, counts, group
+intents and six predicted outcomes were written to
+[`evaluation/corpus-spec-v2.md`](../evaluation/corpus-spec-v2.md) and committed in `eb64fc4`
+**before a single sample existed**. The ordering is verifiable in `git log` rather than asserted.
+
+**Outcome: three of six predictions were correct.** Graded in §7 of that document, misses included.
+
+That is a better result than six of six. A pre-registration where everything lands is evidence the
+predictions were safe, not that the system was understood — and each miss produced something the
+hits did not:
+
+- **P1** (recall would fall to 90–93%; actual **89.0%**) missed because three samples had `EMAIL`
+  as their only Stage 1 entity, and `EMAIL` is `low` severity. The specification assumed "contains
+  a Stage 1 identifier" implied "action-sensitive". It does not, and finding that out is the point.
+- **P4** named a threshold (≥15 points) that was invented rather than reasoned; the actual gap was
+  12.9. The direction was right and the number should never have been stated.
+- **P5** was graded a miss on a tie (4 spurious `PERSON` from each group) even though the looser
+  reading — total spurious claims — would have passed. Regrading against the looser reading
+  afterwards is exactly what pre-registration exists to prevent.
+
+**The finding that mattered most.** **8 of the 11 false negatives had completely correct
+detection.** Every expected entity was found and the message was allowed anyway, because the
+severity policy cannot act on `low` findings. Week 5's target is now a measurement rather than an
+aspiration: **11 points of recall recoverable by policy alone, with no detector changed.**
+
+**The finding that was hardest to write down.** `PERSON` recall is 70.0% on Western names and
+57.1% on the non-Western names of group G3 — a 12.9-point gap. The tool protects some people
+measurably worse than others. It is reported in the ethics section as a result, not softened into
+a caveat. Group G3 existed in the specification *specifically* to measure a weakness in a component
+we chose, which is why the number exists at all.
 
 | Question | Decide by |
 |---|---|

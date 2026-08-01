@@ -112,37 +112,94 @@ Full testing guide, including the console-context trap and debugging by symptom:
 `console.debug` lines (the "why did this Enter pass through" messages) are hidden unless the
 console filter is set to **Verbose**.
 
-### Measured results — Stage 1, 150-sample corpus
+### Measured results — 200-sample corpus
 
 ```
   metric                regex only       stage 1   stage 1 + 2
-  recall                    82.7%        100.0%        100.0%
+  recall                    76.0%         89.0%         89.0%
   false-positive             0.0%          0.0%          0.0%
   precision                100.0%        100.0%        100.0%
-  precision @ 1%           100.0%        100.0%        100.0%
-  F1                        90.5%        100.0%        100.0%
-  latency p95             0.018ms       0.019ms       3.490ms
+  F1                        86.4%         94.2%         94.2%
+  latency p95             0.019ms       0.020ms       3.695ms
 ```
 
-**Entropy buys 17 points of recall at no false-positive cost.** That is the one clean,
-well-supported claim in this table.
+**Entropy buys 13 points of recall at no false-positive cost.** Still the one clean claim in the
+action-level table.
 
-#### Read the 100% as a warning, not a result
+> **Comparison with the v1 (150-sample) corpus**, kept verbatim rather than replaced, because the
+> corpus changed between them and a number that moves for that reason must not be presented as
+> progress:
+>
+> ```
+>   metric                regex only       stage 1   stage 1 + 2
+>   recall                    82.7%        100.0%        100.0%
+>   F1                        90.5%        100.0%        100.0%
+> ```
+>
+> v1 was **saturated** — zero misclassified samples, so no improvement could be measured at all
+> ([D30](docs/decisions.md)). v2 adds 50 samples written to a
+> [specification committed before any of them existed](evaluation/corpus-spec-v2.md), with six
+> predictions recorded in advance. **Three of the six were wrong**, and the grading is in §7 of
+> that document.
 
-**This corpus is saturated: every detector improvement now has nothing left to measure.**
-A perfect score on 150 samples the author wrote is a statement about the corpus, not about the
-detector. The Wilson interval says so out loud — 0 false positives in 75 benign samples means the
-true rate lies somewhere in **[0%, 4.9%]**, not at zero. The corpus cannot resolve anything finer
-than about one in twenty.
+#### The finding that shapes Week 5: detection is not the limiter
 
-Two consequences that the report must carry rather than bury:
+Recall is 89%. Eleven sensitive messages were allowed through. Look at what happened to one:
 
-- **Stage 2's value is currently unmeasurable here.** It changes no metric, because there is no
-  headroom left in which to change one. What it buys is *capability* — `PERSON`, `ORGANIZATION`,
-  `LOCATION`, categories Stage 1 structurally cannot reach — at a 200× latency cost that is still
-  invisible to a user. Task 4.3 extends the corpus so that capability becomes measurable.
-- **The regex-only baseline is now also at 100% precision**, so "Stage 2 reduces false positives"
-  is *not* demonstrated by this run and is not claimed.
+```
+FALSE NEGATIVE  S076   "draft a termination letter for Marcus Delgado, our
+                        regional sales lead at Brightpath Logistics..."
+  expected:  PERSON, ORGANIZATION
+  found:     ORGANIZATION, PERSON      ← detection was perfect
+  action:    allow                     ← and it was allowed anyway
+```
+
+**8 of the 11 false negatives had completely correct detection.** Every entity was found; the
+message went through because `PERSON` and `ORGANIZATION` are `low` severity, and `low` means
+`allow` ([D27](docs/decisions.md)).
+
+That turns Week 5 from "build a risk engine" into a measured target: **11 points of recall are
+recoverable by severity policy alone, with no change to any detector.**
+
+An unplanned case fell out of the same run — `name + employer + working email address` is
+currently **allowed**, because each finding is individually low severity. Under GDPR that is
+unambiguously personal data.
+
+#### Entity-level metrics — where Stage 2 finally becomes visible
+
+Every action-level number answers *"should this message have been stopped?"*. Semantic findings
+are `low` severity and therefore always resolve to `allow`, so **Stage 2 cannot move any of them,
+no matter how many samples are added**. It is measured per entity type instead:
+
+| type | n | recall | precision |
+|---|---|---|---|
+| `PERSON` | 29 | 79.3% | 69.7% |
+| `ORGANIZATION` | 21 | 85.7% | **51.4%** |
+| `LOCATION` | 7 | **42.9%** | **37.5%** |
+| `CREDIT_CARD`, `US_SSN`, `IBAN`, all vendor keys | — | 100% | 100% |
+| `HIGH_ENTROPY_STRING` | 15 | 86.7% | 100% |
+| `EMAIL` | 11 | 100% | 84.6% |
+
+`LOCATION` finds under half of what is present and is wrong about two-thirds of what it claims —
+the weakest component in the system, and a candidate for removal. `ORGANIZATION` precision of
+51.4% means **half of everything it reports is wrong**; harmless at `low` severity, but any Week 5
+fusion rule that treats it as evidence inherits a coin flip.
+
+This view also caught two defects that were invisible while only actions were measured:
+`HIGH_ENTROPY_STRING` recall is 86.7%, not 100%, and `EMAIL` precision is 84.6%.
+
+#### A measured ethical finding
+
+`PERSON` recall is **70.0%** on Western names and **57.1%** on the Indian, Chinese, Arabic,
+Vietnamese and West African names of group G3.
+
+spaCy's English models are trained predominantly on Western news text, and this is the
+consequence: **the tool protects some people measurably worse than others.** It is reported as a
+result, not a caveat.
+
+The layering partially compensates, which nobody designed and which is worth saying: the G3
+samples that *were* caught were caught by `INDIA_PAN`, `INDIA_AADHAAR` and `CREDIT_CARD` — Stage 1
+rules written deliberately for a non-US context.
 
 #### Context requirements (4.2)
 
@@ -500,17 +557,25 @@ Every task is independently testable — you know it works before moving on.
 |---|---|---|
 | 4.1 Presidio + spaCy, allowlisted entities, merged without double-counting | Semantic labels appear; no secret is suppressed by one | ✅ |
 | 4.2 Context requirements for the two weakest rules | Same token flagged when used, ignored when discussed | ✅ |
-| 4.3 Extend the corpus with person/organisation PII | Stage 2's contribution becomes measurable | ⬜ **next** |
+| 4.3a Entity-level metrics + entity registry | Per-type recall/precision printed | ✅ |
+| 4.3b Corpus extension to 200 samples, pre-registered | Predictions graded, three of six wrong | ✅ |
+
+**Week 4 complete.**
 
 > **The plan changed, and the reason is worth recording.** Week 4 was written to end with "the
-> false-positive drop vs. Week 3 — the single most important number in the report." That number
-> does not exist, because 4.2 took the false-positive rate to **zero on regex alone**. Stage 2 has
-> no false positives left to remove.
+> false-positive drop vs. Week 3 — the single most important number in the report." **That number
+> does not exist**, because 4.2 took the false-positive rate to zero on regex alone, leaving Stage
+> 2 no false positives to remove.
 >
-> This is a corpus limitation, not a Stage 2 failure, and 4.3 is the honest response: extend the
-> corpus to cover the PII categories only Stage 2 can reach, and report the pre- and
-> post-extension numbers side by side. See **[D30](docs/decisions.md)** for why the extension is
-> specified in advance rather than tuned to the outcome.
+> The deeper reason emerged in 4.3 and is structural rather than incidental: the corpus labels the
+> **action** ([D21](docs/decisions.md)) and semantic findings are `low` severity and therefore
+> always `allow` ([D27](docs/decisions.md)), so **Stage 2 can never change an action-level metric**
+> under the current policy. No quantity of new samples could have produced the promised delta.
+>
+> Meanwhile `Sample.expected` had been loaded and ignored by `metrics.py` since Week 3 —
+> entity-level evaluation simply did not exist. 4.3a built it, and Stage 2 became measurable
+> immediately. See **[D31](docs/decisions.md)** and
+> **[the pre-registered specification](evaluation/corpus-spec-v2.md)**.
 
 ### Week 5 — Stage 5 + persistence
 Risk engine (weighted fusion, tunable config file) · thresholds → allow/warn/redact/block ·

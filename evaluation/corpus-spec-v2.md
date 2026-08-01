@@ -151,3 +151,97 @@ is on the roadmap.
   the same rule v1 followed.
 - **No sample is written by looking at what the detector currently does.** Author from the
   specification above, run once, report.
+
+---
+
+## 7. Results — graded 2026-08-01
+
+Everything above this line was committed in `eb64fc4`, before any sample existed. Everything below
+is the outcome.
+
+### 7.1 The predictions
+
+| # | Predicted | Actual | |
+|---|---|---|---|
+| P1 | Action recall falls to 90–93% | **89.0%** | ✗ **miss** |
+| P2 | Action-level FPR stays 0% | **0.0%** | ✓ hit |
+| P3 | No action-level difference between Stage 1 and Stage 1+2 | identical on every metric | ✓ hit |
+| P4 | G3 `PERSON` recall ≥15 points below G2 | 57.1% vs 70.0% — **12.9 points** | ✗ **miss** |
+| P5 | `PERSON` precision hurt more by G6 than G5 | 4 spurious each — **tied** | ✗ **miss** |
+| P6 | p95 latency rises | 3.490 ms → 3.695 ms | ✓ hit |
+
+Three of six. That is a more credible result than six of six would have been, and each miss taught
+something the hits did not.
+
+**Why P1 missed.** 11 false negatives, not the 8 predicted. The three extra were `S086`, `S090`
+and `S098` — G2/G3 samples whose only Stage 1 entity is an **`EMAIL`**, which is `low` severity and
+therefore allows. §3 assumed "a Stage 1 identifier" would make a sample action-sensitive; `EMAIL`
+does not. The error was in the specification, not the samples, and it exposed a policy question
+nobody had asked (§7.3).
+
+**Why P4 missed.** The direction and rough size were right, the threshold was invented. 12.9 points
+is a serious gap and the prediction should have named a direction rather than a number pulled from
+nowhere.
+
+**Why P5 missed.** `PERSON` spurious counts came out 4 for G5 and 4 for G6. Total spurious claims
+*were* higher for G6 (8 vs 6), but that is not what was written down, and grading against the
+looser reading afterwards is exactly the move pre-registration exists to prevent.
+
+### 7.2 The headline finding: detection is not the limiter
+
+```
+FALSE NEGATIVE  S076
+  expected:  PERSON, ORGANIZATION
+  found:     ORGANIZATION, PERSON        <- detection was perfect
+  action:    allow                       <- and it was allowed anyway
+```
+
+**8 of the 11 false negatives had completely correct detection.** Stage 2 found every entity the
+ground truth asked for, and the message went through regardless, because `PERSON` and
+`ORGANIZATION` are `low` severity and `low` maps to `allow`.
+
+This is the single most useful number 4.3 produced. It converts a vague Week 5 goal — "build a risk
+engine" — into a measured target: **11 points of recall are recoverable by severity policy alone,
+with no change to any detector.**
+
+### 7.3 An unplanned finding: `name + email` is currently allowed
+
+`S086` — *"send the signed contract to Miriam Feldstein at Halcyon Partners, her address is
+m.feldstein@halcyonpartners.co"* — is allowed. Every entity is found; all are `low`.
+
+A name, an employer and a working email address is a complete contactable identity, and under
+GDPR it is unambiguously personal data. The current policy treats it as three harmless facts
+because it can only reason about findings one at a time. This is precisely the case
+[D27](../docs/decisions.md) predicted would need combination logic, now with a corpus sample
+attached to it.
+
+### 7.4 Stage 2 measured at last
+
+| type | n | recall | precision | spurious |
+|---|---|---|---|---|
+| `PERSON` | 29 | 79.3% | 69.7% | 10 |
+| `ORGANIZATION` | 21 | 85.7% | 51.4% | 17 |
+| `LOCATION` | 7 | 42.9% | 37.5% | 5 |
+
+Against §5's falsification criterion (recall below ~60% would mean Stage 2 is not worth 3 ms):
+`PERSON` and `ORGANIZATION` clear it, `LOCATION` does not. **`LOCATION` is the weakest component
+in the system** — it finds under half of what is there and is wrong about two thirds of what it
+claims. It is a candidate for removal from the allowlist, which would also cut Stage 2's cost.
+
+`ORGANIZATION` precision of 51.4% is the other uncomfortable number: **half of everything it
+reports is wrong.** At `low` severity nothing acts on it, so it is currently harmless — but any
+Week 5 fusion rule that treats an `ORGANIZATION` finding as evidence inherits a coin flip.
+
+### 7.5 The ethical finding
+
+`PERSON` recall on Western names is **70.0%**; on the non-Western names of G3 it is **57.1%**.
+
+spaCy's English models are trained predominantly on Western news text, and this measures the
+consequence: the tool protects people with Indian, Chinese, Arabic, Vietnamese and West African
+names **measurably worse** than it protects people with Anglo-European ones.
+
+That belongs in the report's ethics section as a measured result rather than a caveat. It is also
+an argument for the layered design — the G3 samples that *were* caught were caught by
+`INDIA_PAN`, `INDIA_AADHAAR` and `CREDIT_CARD`, rules written deliberately for a non-US context.
+Stage 1 partially compensates for Stage 2's cultural bias, which is not a property anyone designed
+and is worth saying out loud.
