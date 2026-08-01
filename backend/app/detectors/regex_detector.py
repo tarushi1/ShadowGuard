@@ -40,6 +40,12 @@ Two things that make it strong
    time, so a 30-character input hangs the server for minutes. Every
    pattern here uses BOUNDED quantifiers and avoids nesting, and the
    API caps input length as a second line of defence.
+
+3. CONTEXT REQUIREMENTS. Two rules here match shapes that occur by
+   accident — twelve digits, or five letters and four digits. They are
+   gated on a supporting word appearing nearby, which is the only way
+   to tell a number being USED from one being DISCUSSED. See
+   `_CONTEXT_WINDOW` below.
 """
 
 import re
@@ -110,7 +116,46 @@ class Rule:
     severity: str
     confidence: float
     validator: Callable[[str], bool] | None = None
+    context_words: tuple[str, ...] = ()
+    """Words that must appear near a match for it to count.
+
+    Empty for most rules, and that is the normal case. A rule needs
+    this only when its pattern alone is weak evidence — see
+    `_CONTEXT_WINDOW`.
+    """
     description: str = ""
+
+
+# ---------------------------------------------------------------
+# Context requirements
+# ---------------------------------------------------------------
+# How far either side of a match we look for a supporting word.
+#
+# Every strong rule in this file draws its confidence from something
+# BEYOND shape: a vendor prefix (ghp_), a checksum (Luhn), a unique
+# header (-----BEGIN). Two rules have no such thing. Twelve digits is
+# also a badge number, an order id, a phone range; five letters and
+# four digits is also an SKU or a part number. For those, the evidence
+# is not in the token at all — it is in the words around it:
+#
+#     "the vendor submitted PAN ABCDE1234F for gst registration"
+#     "our sku format is ABCDE1234F which collides with the validator"
+#
+# The same ten characters, one sensitive and one not. The difference
+# is whether the number is being USED or DISCUSSED, and only context
+# can answer that.
+#
+# 50 characters is about one clause either side. Unbounded matching —
+# "does the word appear anywhere in the message?" — is the tempting
+# simplification and it is wrong: in a long message it would let the
+# word `aadhaar` in the first paragraph validate a twelve-digit build
+# number in the ninth.
+#
+# THE COST, stated plainly because it belongs in the report: this
+# trades recall for precision. "my number is 2345 6789 0123" carries
+# no supporting word and is now missed. That is an accepted trade for
+# rules this weak, not a free improvement.
+_CONTEXT_WINDOW = 50
 
 
 # Patterns are compiled once at import. re caches internally, but an
@@ -241,6 +286,15 @@ RULES: tuple[Rule, ...] = (
         pattern=re.compile(r"\b[A-Z]{5}\d{4}[A-Z]\b"),
         severity="high",
         confidence=0.85,
+        # Five letters, four digits, a letter. That shape is also an
+        # SKU, a part number and a coupon code, which is exactly how
+        # `our sku format is ABCDE1234F` was being reported as tax
+        # identity data.
+        context_words=(
+            "pan", "pan card", "pan number", "permanent account",
+            "income tax", "itr", "tds", "gst", "gstin", "kyc",
+            "taxpayer", "assessee",
+        ),
         description="Indian Permanent Account Number.",
     ),
     Rule(
@@ -254,11 +308,21 @@ RULES: tuple[Rule, ...] = (
         pattern=re.compile(r"(?<![\d-])[2-9]\d{3}[ -]?\d{4}[ -]?\d{4}(?![ -]?\d)"),
         severity="critical",
         confidence=0.7,
+        # The weakest pattern in the file: twelve digits and nothing
+        # else. Badge numbers, order ids and phone ranges all match it,
+        # which is why it is the one rule that needs BOTH the
+        # lookarounds above and a context requirement.
+        context_words=(
+            "aadhaar", "aadhar", "adhaar", "uidai", "uid",
+            "kyc", "ekyc", "biometric", "enrolment", "enrollment",
+            "identity", "id proof", "national id",
+        ),
         description=(
             "Indian Aadhaar number. Confidence is deliberately lower because "
             "any standalone 12-digit number matches. Aadhaar carries a Verhoeff "
             "checksum; implementing it would do for this rule what Luhn does "
-            "for cards. Tracked as a known precision gap."
+            "for cards. Tracked as a known precision gap, and the reason this "
+            "rule is gated on context."
         ),
     ),
 
@@ -274,6 +338,47 @@ RULES: tuple[Rule, ...] = (
         confidence=0.95,
     ),
 )
+
+
+# One compiled alternation per gated rule, built once at import.
+#
+# `\b` around the group is doing real work: without it, "pan" matches
+# inside "company", "expand", "Japan" and "panel", and the gate would
+# wave through most of what it exists to stop.
+_CONTEXT_PATTERNS: dict[str, re.Pattern] = {
+    rule.name: re.compile(
+        r"\b(?:" + "|".join(re.escape(word) for word in rule.context_words) + r")\b",
+        re.IGNORECASE,
+    )
+    for rule in RULES
+    if rule.context_words
+}
+
+
+def has_supporting_context(text: str, start: int, end: int, rule_name: str) -> bool:
+    """Does a supporting word appear near this match?
+
+    The match itself is EXCLUDED from the searched window, and that is
+    a security property rather than a tidiness one. Include it and a
+    PAN beginning with the letters PAN would validate itself, which
+    turns the gate into something an attacker can satisfy by choosing
+    a convenient value.
+
+    :param text: the full text being scanned
+    :param start: match start offset
+    :param end: match end offset, exclusive
+    :param rule_name: which rule's context words to look for
+    """
+    pattern = _CONTEXT_PATTERNS.get(rule_name)
+    if pattern is None:  # ungated rule — nothing to satisfy
+        return True
+
+    before = text[max(0, start - _CONTEXT_WINDOW) : start]
+    after = text[end : end + _CONTEXT_WINDOW]
+
+    # Joined with a space so a word cut in half at one edge cannot
+    # accidentally join a fragment at the other and match.
+    return pattern.search(f"{before} {after}") is not None
 
 
 # ---------------------------------------------------------------
@@ -300,6 +405,14 @@ def scan(text: str) -> list[Finding]:
             # exists, a match that fails it is discarded silently —
             # that is the whole point of having it.
             if rule.validator is not None and not rule.validator(value):
+                continue
+
+            # A validator asks "is this string well-formed?"; a context
+            # requirement asks "is this string being USED here?". Two
+            # different questions, so two separate gates — a valid PAN
+            # quoted as an example format is well-formed and still not
+            # a disclosure.
+            if not has_supporting_context(text, match.start(), match.end(), rule.name):
                 continue
 
             findings.append(

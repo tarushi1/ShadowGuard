@@ -251,6 +251,16 @@ def main() -> None:
 
     samples = load()
 
+    # Load the spaCy model BEFORE timing anything.
+    #
+    # Without this the first sample is charged the ~1.2s model load and
+    # the reported mean comes out around 10ms against a true 2.4ms —
+    # four times too high, for a cost no user ever pays, because the
+    # server warms up at startup. The percentiles absorbed it; the mean
+    # did not, which is the exact failure mode this harness warns about
+    # in its own latency section.
+    orchestrator.semantic_detector.warm_up()
+
     results: dict[str, tuple[Confusion, list[Outcome]]] = {}
     for name, stages in CONFIGURATIONS.items():
         outcomes = evaluate(samples, **stages)

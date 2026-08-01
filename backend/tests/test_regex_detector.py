@@ -213,6 +213,87 @@ def test_a_standalone_aadhaar_is_still_detected():
     assert "INDIA_AADHAAR" in types_in("aadhaar 2345 6789 0123 on file")
 
 
+# ---------------------------------------------------------------
+# Context requirements
+# ---------------------------------------------------------------
+
+def test_the_same_token_is_sensitive_or_not_depending_on_context():
+    """The clearest single demonstration of what this project claims.
+
+    Identical characters, opposite verdicts, decided entirely by the
+    surrounding words. One is a tax identifier being USED; the other is
+    a format being DISCUSSED. No pattern, checksum or entropy measure
+    can separate them, because the evidence is not in the token.
+    """
+    used = "the vendor submitted PAN ABCDE1234F for gst registration"
+    discussed = "our sku format is ABCDE1234F which collides with the validator"
+
+    assert "INDIA_PAN" in types_in(used)
+    assert "INDIA_PAN" not in types_in(discussed)
+
+
+def test_twelve_digits_without_supporting_words_are_not_an_aadhaar():
+    """The weakest pattern in the file needs the strongest gate.
+
+    Twelve digits is also a badge number, an order id and a phone
+    range. Before this rule was gated, the sample below was reported as
+    critical national identity data.
+    """
+    assert types_in("employee badge numbers run from 100000000000 to 999999999999") == set()
+
+
+def test_context_words_are_matched_whole():
+    """`pan` inside `company`, `expand` or `Japan` must not count.
+
+    Without word boundaries the gate would be satisfied by most English
+    prose and would quietly stop doing anything — the worst kind of
+    failure, because every test above it would still pass.
+    """
+    assert "INDIA_PAN" not in types_in("the company issued ABCDE1234F as a part number")
+
+
+def test_a_supporting_word_beyond_the_window_does_not_count():
+    """Proximity is the point.
+
+    "Does the word appear anywhere in the message?" is the tempting
+    simplification. In a long message it lets `aadhaar` in the first
+    sentence validate a twelve-digit build number in the ninth.
+    """
+    from backend.app.detectors.regex_detector import _CONTEXT_WINDOW
+
+    far = "aadhaar" + ("x" * (_CONTEXT_WINDOW + 20)) + " 2345 6789 0123"
+    assert "INDIA_AADHAAR" not in types_in(far)
+
+
+def test_context_may_follow_the_match():
+    """People write the number first at least as often as last."""
+    assert "INDIA_AADHAAR" in types_in("2345 6789 0123 is the aadhaar on the form")
+
+
+def test_a_match_cannot_supply_its_own_context():
+    """A security property, not a tidiness one.
+
+    If the searched window included the match, a PAN whose letters
+    happen to spell a context word would validate itself — a gate the
+    sender can satisfy by choosing a convenient value is not a gate.
+    """
+    from backend.app.detectors.regex_detector import has_supporting_context
+
+    text = "PANAB1234C"
+    assert not has_supporting_context(text, 0, len(text), "INDIA_PAN")
+
+
+def test_strong_rules_are_not_gated():
+    """Context requirements are for weak patterns only.
+
+    A vendor prefix, a checksum or a unique header is already
+    sufficient evidence. Demanding context from those would trade away
+    recall for nothing.
+    """
+    assert types_in("AKIAIOSFODNN7EXAMPLE") == {"AWS_ACCESS_KEY_ID"}
+    assert types_in("4111 1111 1111 1111") == {"CREDIT_CARD"}
+
+
 def test_findings_are_returned_in_document_order():
     text = "email arushi@example.com then use AKIAIOSFODNN7EXAMPLE"
     findings = scan(text)
