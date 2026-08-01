@@ -22,6 +22,8 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+from backend.app.detectors.catalog import is_blocking, severity_of
+
 CORPUS_PATH = Path(__file__).parent / "data" / "corpus.jsonl"
 
 LABELS = {"sensitive", "benign"}
@@ -61,11 +63,27 @@ class Sample:
     """
 
     expected: tuple[str, ...]
-    """Entity types a correct detector should find. Empty for benign.
+    """Entity types a correct detector should find — for EVERY sample.
 
-    Secondary to `label`: used for per-type analysis, not for the
-    headline pass/fail. A detector that flags the right message for a
-    slightly wrong reason has still protected the user.
+    Secondary to `label`: `label` drives the headline pass/fail, this
+    drives per-type analysis. A detector that flags the right message
+    for a slightly wrong reason has still protected the user.
+
+    Populated on benign samples too, and that is a v2 change. The old
+    rule was "benign implies expected is empty", which was wrong and
+    was already producing a small lie in v1:
+
+        H035  "email me at arushi@example.com when the build finishes"
+              expected: []
+
+    A correct detector DOES find an EMAIL there; the message is allowed
+    because an email alone is low severity, not because nothing is
+    present. Conflating "found nothing" with "did nothing" made Stage
+    2 impossible to measure, since every semantic finding is low
+    severity and therefore lives entirely inside benign samples.
+
+    The honesty guarantee the old rule provided is preserved by
+    `is_blocking` below, in a stronger form.
     """
 
     note: str = ""
@@ -120,14 +138,33 @@ def load(path: Path | None = None) -> list[Sample]:
         if not text.strip():
             raise ValueError(f"{sample_id}: empty text")
 
-        # The two consistency rules that keep the ground truth honest.
-        # A benign sample listing expected entities, or a sensitive one
-        # listing none, means the labeller was unsure — and an unsure
-        # label silently corrupts every metric computed from it.
-        if label == "benign" and expected:
-            raise ValueError(f"{sample_id}: benign samples must expect no entities")
+        # The consistency rules that keep the ground truth honest. A
+        # label that disagrees with its own expected entities means the
+        # labeller was unsure, and an unsure label silently corrupts
+        # every metric computed from it.
         if label == "sensitive" and not expected:
             raise ValueError(f"{sample_id}: sensitive samples must list expected entities")
+
+        for entity_type in expected:
+            # A typo like CREDIT_CARDS must fail loudly. Silently
+            # accepting an unknown type would make its per-type recall
+            # 0% for a reason that has nothing to do with the detector.
+            if severity_of(entity_type) is None:
+                raise ValueError(
+                    f"{sample_id}: unknown entity type {entity_type!r} — "
+                    f"not produced by any detector"
+                )
+
+            # Replaces the old "benign samples must expect no entities".
+            # Same guarantee — you cannot label a leak as benign — but
+            # checked against the detectors' real severity table rather
+            # than against emptiness, so benign samples can still record
+            # the low-severity entities they genuinely contain.
+            if label == "benign" and is_blocking(entity_type):
+                raise ValueError(
+                    f"{sample_id}: labelled benign but expects {entity_type!r}, "
+                    f"which is {severity_of(entity_type)} severity and would not be allowed"
+                )
 
         seen_ids.add(sample_id)
         samples.append(

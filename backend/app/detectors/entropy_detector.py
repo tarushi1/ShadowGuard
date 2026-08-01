@@ -66,6 +66,18 @@ from .base import Finding, resolve_overlaps
 
 DETECTOR_NAME = "entropy"
 
+# The one entity type this stage emits, and its severity.
+#
+# Named constants rather than literals at the construction site because
+# `catalog.py` assembles the project-wide entity registry from the
+# detectors themselves. A hand-copied table is correct the day it is
+# written and wrong the first time a severity changes.
+FINDING_TYPE = "HIGH_ENTROPY_STRING"
+
+# Capped at medium on purpose. See the module docstring: random-looking
+# is suspicious, not proven, and this stage must never block alone.
+MAX_SEVERITY = "medium"
+
 # Below this, an entropy estimate is not meaningful — there are too
 # few characters for the distribution to say anything. It also keeps
 # ordinary words out of consideration entirely.
@@ -246,15 +258,12 @@ def scan(text: str) -> list[Finding]:
 
         findings.append(
             Finding(
-                type="HIGH_ENTROPY_STRING",
+                type=FINDING_TYPE,
                 start=match.start(),
                 end=match.end(),
                 score=_confidence_for(entropy, threshold, classes),
                 detector=DETECTOR_NAME,
-                # Capped at medium on purpose. See the module docstring:
-                # random-looking is suspicious, not proven, and this
-                # stage must never block on its own.
-                severity="medium",
+                severity=MAX_SEVERITY,
                 value=token,
             )
         )

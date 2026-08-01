@@ -39,7 +39,14 @@ from backend.app.pipeline import orchestrator
 from backend.app.schemas.analyze import Action
 
 from .corpus import Sample, load
-from .metrics import ASSUMED_PREVALENCE, Confusion, confusion_from, percentile
+from .metrics import (
+    ASSUMED_PREVALENCE,
+    Confusion,
+    TypeCount,
+    confusion_from,
+    entity_counts,
+    percentile,
+)
 
 RESULTS_DIR = Path(__file__).parent / "results"
 
@@ -109,6 +116,12 @@ def confusion_for(outcomes: list[Outcome]) -> Confusion:
     return confusion_from([(o.sample.is_sensitive, o.predicted_sensitive) for o in outcomes])
 
 
+def entity_counts_for(outcomes: list[Outcome]) -> list[TypeCount]:
+    return entity_counts(
+        [(frozenset(o.sample.expected), frozenset(o.found_types)) for o in outcomes]
+    )
+
+
 # ---------------------------------------------------------------
 # Reporting
 # ---------------------------------------------------------------
@@ -153,6 +166,58 @@ def _breakdown(title: str, groups: dict[str, list[Outcome]]) -> str:
         fpr = f"{c.false_positive_rate:8.1%}" if (c.fp + c.tn) else "       -"
 
         lines.append(f"  {key:<16} {len(outcomes):>4} {recall} {fpr} {errors:>8}")
+
+    return "\n".join(lines)
+
+
+def _by_entity_type(counts: list[TypeCount]) -> str:
+    """Per-type detection quality — where Stage 2 becomes visible.
+
+    Every other table in this harness answers "should the message have
+    been stopped?". Semantic findings are `low` severity and therefore
+    always resolve to `allow`, so Stage 2 cannot move a single number
+    in any of them. This is the table it appears in.
+    """
+    from backend.app.detectors.catalog import severity_of
+
+    lines = [
+        "BY ENTITY TYPE  (detection quality, independent of the action)",
+        _rule(),
+        f"  {'type':<22} {'sev':<9} {'n':>4} {'recall':>8} {'prec':>8} {'miss':>6} {'spur':>6}",
+    ]
+
+    unlabelled: list[str] = []
+
+    for count in counts:
+        # A type the corpus never expects anywhere is UNLABELLED, not
+        # wrong. Printing 0.0% precision for it would read as "the
+        # detector is always mistaken about this" when the truth is
+        # "the ground truth has nothing to say". Inventing bad news is
+        # the same failure as inventing good news, and on a security
+        # tool it is the more persuasive one.
+        if not count.expected_total:
+            unlabelled.append(f"{count.entity_type} ({count.spurious})")
+            recall = precision = "       -"
+        else:
+            recall = f"{count.recall:8.1%}"
+            precision = f"{count.precision:8.1%}"
+
+        lines.append(
+            f"  {count.entity_type:<22} {severity_of(count.entity_type) or '?':<9} "
+            f"{count.expected_total:>4} {recall} {precision} "
+            f"{count.missed:>6} {count.spurious:>6}"
+        )
+
+    lines.append("")
+    lines.append("  n = samples whose ground truth contains this type.")
+    lines.append("  spur = claimed where the corpus says it is not present.")
+
+    if unlabelled:
+        lines.append("")
+        lines.append("  UNLABELLED in this corpus, so recall and precision are undefined:")
+        lines.append(f"    {', '.join(unlabelled)}")
+        lines.append("    The count in brackets is claims made against silent ground truth.")
+        lines.append("    Read it as coverage owed, not as errors made.")
 
     return "\n".join(lines)
 
@@ -290,6 +355,8 @@ def main() -> None:
     print()
     print(_breakdown("BY CATEGORY", by_category))
     print()
+    print(_by_entity_type(entity_counts_for(full_outcomes)))
+    print()
     print(_latency(full_outcomes))
     print()
 
@@ -309,6 +376,7 @@ def main() -> None:
             "configurations": {n: c.as_dict() for n, (c, _) in results.items()},
             "by_difficulty": {k: confusion_for(v).as_dict() for k, v in by_difficulty.items()},
             "by_category": {k: confusion_for(v).as_dict() for k, v in by_category.items()},
+            "by_entity_type": [c.as_dict() for c in entity_counts_for(full_outcomes)],
             "latency_ms": {
                 "mean": round(sum(o.latency_ms for o in full_outcomes) / len(full_outcomes), 4),
                 "p50": round(percentile([o.latency_ms for o in full_outcomes], 50), 4),

@@ -190,6 +190,98 @@ def confusion_from(pairs: list[tuple[bool, bool]]) -> Confusion:
     return Confusion(tp=tp, fp=fp, tn=tn, fn=fn)
 
 
+# ---------------------------------------------------------------
+# Entity-level evaluation
+# ---------------------------------------------------------------
+# A SECOND question, and the distinction is the whole reason Stage 2
+# was unmeasurable until now.
+#
+#   Action level:  "should this message have been stopped?"
+#   Entity level:  "did we find what is actually in it?"
+#
+# The corpus labels the action (D21), so every headline metric answers
+# the first question. But semantic findings carry `low` severity and
+# therefore always resolve to `allow` (D27), which means Stage 2 can
+# never change an action and can never appear in an action-level
+# number — no matter how many samples are added.
+#
+# It shows up here instead. This is a per-TYPE view: for each entity
+# type, across every sample, how often did we find it when it was
+# there, and how often did we claim it when it was not.
+#
+# Set semantics, not span semantics. A sample expecting {PERSON,
+# CREDIT_CARD} and yielding {PERSON, EMAIL} scores one hit, one miss
+# and one spurious type. Offsets are deliberately ignored: the corpus
+# labels which types are present, not where, and demanding character
+# offsets in ground truth would make the corpus far more expensive to
+# extend for a precision nobody consumes.
+
+
+@dataclass(frozen=True)
+class TypeCount:
+    """Per-entity-type tallies across the corpus."""
+
+    entity_type: str
+    found: int
+    """Samples that expected this type and got it."""
+
+    missed: int
+    """Samples that expected this type and did not get it."""
+
+    spurious: int
+    """Samples that got this type without expecting it."""
+
+    @property
+    def expected_total(self) -> int:
+        return self.found + self.missed
+
+    @property
+    def recall(self) -> float:
+        """Of the samples containing this type, how many did we find?"""
+        return self.found / self.expected_total if self.expected_total else 0.0
+
+    @property
+    def precision(self) -> float:
+        """When we claimed this type, how often was it really there?"""
+        claimed = self.found + self.spurious
+        return self.found / claimed if claimed else 0.0
+
+    def as_dict(self) -> dict:
+        return {
+            "type": self.entity_type,
+            "found": self.found,
+            "missed": self.missed,
+            "spurious": self.spurious,
+            "recall": round(self.recall, 4),
+            "precision": round(self.precision, 4),
+        }
+
+
+def entity_counts(
+    pairs: list[tuple[frozenset[str], frozenset[str]]],
+) -> list[TypeCount]:
+    """Tally per-type hits, misses and spurious claims.
+
+    :param pairs: (expected types, found types) — one per sample
+    :returns: one TypeCount per type appearing in either side, sorted
+        by how often it was expected, so the types the corpus actually
+        exercises appear first
+    """
+    types = {t for expected, found in pairs for t in expected | found}
+
+    counts = [
+        TypeCount(
+            entity_type=entity_type,
+            found=sum(1 for e, f in pairs if entity_type in e and entity_type in f),
+            missed=sum(1 for e, f in pairs if entity_type in e and entity_type not in f),
+            spurious=sum(1 for e, f in pairs if entity_type not in e and entity_type in f),
+        )
+        for entity_type in types
+    ]
+
+    return sorted(counts, key=lambda c: (-c.expected_total, c.entity_type))
+
+
 def percentile(values: list[float], q: float) -> float:
     """Nearest-rank percentile.
 
