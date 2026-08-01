@@ -262,5 +262,89 @@
     isEmpty(element) {
       return this.readText(element).trim().length === 0;
     },
+
+    /**
+     * Replace the composer's entire contents.
+     *
+     * The only place ShadowGuard writes to the page, and the hardest
+     * DOM problem in the project. Two different editors, two different
+     * traps, and both fail SILENTLY — the text appears on screen and
+     * the app sends the old value.
+     *
+     * TRAP 1 — React's controlled inputs (<textarea>)
+     * ------------------------------------------------
+     * `element.value = "x"` updates the DOM node but not React's
+     * internal state, and React's synthetic `onChange` never fires
+     * because React deduplicates against its own last known value.
+     * The box shows the new text; React still believes the old text is
+     * there and submits that. The fix is to call the NATIVE value
+     * setter from the prototype, which bypasses React's override, then
+     * dispatch a real `input` event so React reconciles.
+     *
+     * TRAP 2 — ProseMirror (contenteditable)
+     * ---------------------------------------
+     * ProseMirror maintains its own document model and treats the DOM
+     * as a rendering of it. Assigning `innerText` mutates the render
+     * without touching the model, and the next keystroke re-renders
+     * from the model and wipes the change. `execCommand` is deprecated
+     * but is still the reliable way in: it produces the same mutation
+     * path a real paste does, which ProseMirror is built to observe.
+     *
+     * Returns a boolean rather than throwing because the caller must
+     * be able to ABANDON the send. A failed replacement leaves the
+     * ORIGINAL text in the box, and falling through to a normal send
+     * would transmit the secret under an approval the user gave for
+     * the redacted version.
+     *
+     * @param {HTMLElement} element
+     * @param {string} text
+     * @returns {boolean} whether the write appears to have taken
+     */
+    replaceText(element, text) {
+      if (!element) return false;
+
+      try {
+        // ---- <textarea> / <input> ----------------------------
+        if (typeof element.value === "string") {
+          const prototype = Object.getPrototypeOf(element);
+          const descriptor = Object.getOwnPropertyDescriptor(prototype, "value");
+
+          if (descriptor?.set) {
+            descriptor.set.call(element, text);
+          } else {
+            element.value = text;
+          }
+
+          element.dispatchEvent(new Event("input", { bubbles: true }));
+          return element.value === text;
+        }
+
+        // ---- contenteditable (ProseMirror) -------------------
+        element.focus();
+
+        const selection = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        selection.removeAllRanges();
+        selection.addRange(range);
+
+        // insertText on a full selection replaces it. Deprecated, and
+        // still the only call ProseMirror reliably observes.
+        const inserted = document.execCommand("insertText", false, text);
+
+        if (!inserted) {
+          // Last resort. Works on a plain contenteditable, and is
+          // expected to fail on ProseMirror — which is exactly why the
+          // caller re-reads afterwards instead of trusting this.
+          element.textContent = text;
+          element.dispatchEvent(new InputEvent("input", { bubbles: true }));
+        }
+
+        return this.readText(element).includes(text.slice(0, 24));
+      } catch (error) {
+        console.error("[ShadowGuard] replaceText failed:", error);
+        return false;
+      }
+    },
   });
 })();

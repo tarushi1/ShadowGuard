@@ -222,27 +222,175 @@
     // than three identical ones.
     const entityTypes = [...new Set(verdict.entities.map((e) => e.type))];
 
+    // ---- redact: offer a safer version --------------------------
+    // The only path where ShadowGuard rewrites what the user typed,
+    // and it never does so without showing them the exact result
+    // first. Silently editing someone's message and sending it would
+    // be a worse betrayal of trust than either warning or blocking.
+    //
+    // Guarded on `redacted_text` actually being present: if the server
+    // says `redact` but sends nothing to substitute, there is no safe
+    // action available, so fall through to an ordinary warning rather
+    // than inventing one.
+    const redacting =
+      verdict.action === SG.ACTION.REDACT && Boolean(verdict.redacted_text);
+
+    if (verdict.action === SG.ACTION.REDACT && !redacting) {
+      console.warn(`${TAG} server asked for redaction but sent no replacement — warning instead.`);
+    }
+
     const decision = await modal.show({
+      variant: redacting ? "redact" : "risk",
       level: verdict.level,
       score: verdict.score,
       entities: entityTypes,
       message: verdict.message,
       preview: previewOf(text),
+      redactedText: redacting ? previewOf(verdict.redacted_text) : "",
 
       // No override at block severity. warn is advisory; block is not.
       allowProceed: verdict.action !== SG.ACTION.BLOCK,
     });
 
-    if (decision === "proceed") {
-      approve();
-    } else {
+    if (decision !== "proceed") {
       discard();
+      return;
     }
+
+    // The modal previews a TRUNCATED redaction for readability; what
+    // gets sent is the full string from the server. Sending the
+    // preview would silently drop the tail of long messages.
+    if (redacting) sendRedacted(verdict.redacted_text);
+    else approve();
   }
 
   /** Trim the user's text to something that fits the modal. */
   function previewOf(text) {
     return text.length > 160 ? `${text.slice(0, 160)}…` : text;
+  }
+
+  // ---------------------------------------------------------------
+  // Acting on the decision
+  // ---------------------------------------------------------------
+  /**
+   * Send the held message.
+   *
+   * @param {{silent?: boolean}} [options]
+   * @returns {boolean} whether a replay was attempted
+   */
+  function approve({ silent = false } = {}) {
+    if (!pending) {
+      console.warn(`${TAG} nothing pending to approve.`);
+      return false;
+    }
+    if (!composer) {
+      console.error(`${TAG} composer went away — cannot replay.`);
+      pending = null;
+      return false;
+    }
+
+    // The composer stays editable while a decision is outstanding, so
+    // the user can change the text after it was analysed and before
+    // they approve. Sending the edited version would ship text that
+    // never passed inspection. This is bypass B1; it is a warning
+    // today and becomes re-analysis in a later task.
+    const current = adapter.readText(composer);
+    if (current !== pending.text) {
+      console.warn(
+        `${TAG} composer text changed since it was inspected ` +
+        `(${pending.text.length} → ${current.length} chars).`
+      );
+    }
+
+    const result = adapter.send(composer);
+    pending = null;
+
+    if (!silent) {
+      console.log(
+        `%c ${TAG} SEND REPLAYED `,
+        "background:#0a7d47; color:#fff; padding:2px 6px; border-radius:3px;",
+        `via ${result.method} (${result.detail})`
+      );
+    }
+
+    // ---- Verify the effect, do not assume the action worked ------
+    // A send that silently no-ops is the worst outcome: the user
+    // believes their approved message went, and it did not.
+    //
+    // Deliberately a warning and NOT an auto-retry. Retrying a failed
+    // action is good practice in most apps; in a DLP tool it means the
+    // message you were already unsure about gets sent twice.
+    setTimeout(() => {
+      if (composer && !adapter.isEmpty(composer)) {
+        console.warn(
+          `${TAG} composer still has text ${VERIFY_DELAY_MS}ms after replay — ` +
+          `the send may not have gone through. Not retrying automatically.`
+        );
+      }
+    }, VERIFY_DELAY_MS);
+
+    return true;
+  }
+
+  /** Drop the held message. The text stays in the box so it can be edited. */
+  function discard() {
+    if (!pending) {
+      console.warn(`${TAG} nothing pending to discard.`);
+      return false;
+    }
+    pending = null;
+    console.log(`${TAG} pending send discarded — text left in the composer for editing.`);
+    return true;
+  }
+
+  /**
+   * Replace the composer's contents, then send.
+   *
+   * Used for the `redact` decision, which is the only path where
+   * ShadowGuard rewrites what the user typed — and it does so only
+   * after they have seen the exact replacement and clicked approve.
+   *
+   * @param {string} replacement the redacted text from the backend
+   * @returns {boolean}
+   */
+  function sendRedacted(replacement) {
+    if (!pending || !composer) {
+      console.warn(`${TAG} nothing pending to redact.`);
+      return false;
+    }
+
+    if (!adapter.replaceText(composer, replacement)) {
+      // Refusing to fall through to a normal send is the important
+      // part. If the replacement did not take, the composer still
+      // holds the ORIGINAL text, and sending it would transmit the
+      // secret under an approval the user gave for the redacted
+      // version — the worst possible failure of this feature.
+      console.error(`${TAG} could not replace composer text — send abandoned.`);
+      pending = null;
+      return false;
+    }
+
+    // Re-read rather than trust the write. ProseMirror and React both
+    // reserve the right to normalise, reject or reformat what was set,
+    // and "we asked for it" is not evidence that it happened.
+    const actual = adapter.readText(composer);
+    if (!actual.includes("[REDACTED:")) {
+      console.error(
+        `${TAG} redaction did not survive the editor — send abandoned. ` +
+        `Composer holds ${actual.length} chars.`
+      );
+      pending = null;
+      return false;
+    }
+
+    pending = { ...pending, text: replacement };
+    console.log(
+      `%c ${TAG} SENDING REDACTED `,
+      "background:#7d5a0a; color:#fff; padding:2px 6px; border-radius:3px;",
+      replacement
+    );
+
+    return approve({ silent: true });
   }
 
   // ---------------------------------------------------------------
@@ -290,6 +438,15 @@
 
     /** Modal "Cancel" — drop it, leaving the text in the box. */
     discard,
+
+    /** Modal "Send redacted" — swap the composer's text, then send. */
+    sendRedacted,
+
+    /**
+     * Try a composer rewrite without sending, to check the editor
+     * trap in isolation. Returns whether the write took.
+     */
+    tryReplace: (text = "[REDACTED: TEST]") => adapter.replaceText(composer, text),
 
     /** Where would send() route right now? Useful when replay misbehaves. */
     sendButton: () => adapter.findSendButton(),

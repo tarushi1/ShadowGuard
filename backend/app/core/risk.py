@@ -51,6 +51,7 @@ from dataclasses import dataclass
 
 from ..detectors.base import Finding, context_window
 from ..schemas.analyze import Action, RiskLevel
+from . import redactor
 from .policy import CLASS_OF, DATA_SUBJECT_MARKERS, DEFAULT_POLICY, RiskPolicy
 
 # `\b` matters as much here as it did in D29: without it, `hr` matches
@@ -128,21 +129,108 @@ def assess(
         return RiskAssessment(0, Action.ALLOW, RiskLevel.LOW, ())
 
     reasons: list[str] = []
-    score = _base_score(findings, text, policy, reasons)
-    score += _combination_bonus(findings, policy, reasons)
+    score = _score_of(findings, text, policy, reasons)
+
+    return RiskAssessment(
+        score=round(score),
+        action=_action_for(score, policy, redactable=_can_redact(findings, text, policy)),
+        level=_level_for(score, policy),
+        reasons=tuple(reasons),
+    )
+
+
+def _score_of(
+    findings: list[Finding],
+    text: str,
+    policy: RiskPolicy,
+    reasons: list[str] | None = None,
+) -> float:
+    """The full score for a set of findings.
+
+    Called twice: once for everything found, and once for what would
+    remain after redaction. Cheap enough to repeat because no detector
+    runs here — this is arithmetic over results that already exist.
+    """
+    if not findings:
+        return 0.0
+
+    collected: list[str] = [] if reasons is None else reasons
+
+    score = _base_score(findings, text, policy, collected)
+    score += _combination_bonus(findings, policy, collected)
 
     # Clamped, not normalised. A message containing four private keys
     # is not four times worse than one containing a single key — past
     # a point the question is already settled and further evidence
     # changes nothing.
-    score = max(0.0, min(100.0, score))
+    return max(0.0, min(100.0, score))
 
-    return RiskAssessment(
-        score=round(score),
-        action=_action_for(score, policy),
-        level=_level_for(score, policy),
-        reasons=tuple(reasons),
-    )
+
+def removable(
+    findings: list[Finding],
+    policy: RiskPolicy = DEFAULT_POLICY,
+) -> list[Finding]:
+    """The findings redaction is allowed to strip.
+
+    Public because the orchestrator must redact EXACTLY this set. The
+    decision to offer redaction was made by asking what the message
+    looks like once these are gone; removing anything else would
+    deliver a different message from the one that was approved.
+
+    Getting that wrong produced
+
+        "send the signed contract to [REDACTED: PERSON] at
+         [REDACTED: ORGANIZATION], her address is [REDACTED: EMAIL]"
+
+    from a decision that had only ever justified removing the address.
+    """
+    return [f for f in findings if CLASS_OF.get(f.type) in policy.redactable_classes]
+
+
+def _can_redact(findings: list[Finding], text: str, policy: RiskPolicy) -> bool:
+    """Would removing what we CAN remove actually solve the problem?
+
+    Two conditions, and both matter.
+
+    **Something must be left to say.** Someone who pastes a private key
+    and nothing else would otherwise be handed `[REDACTED: PRIVATE_KEY]`,
+    which is a receipt rather than a message. That is what `block` is
+    for, and this guard is what keeps `block` meaningful.
+
+    **Redaction must RESOLVE the risk, not merely reduce it.** Offering
+    to redact and leaving the message still worth warning about is the
+    worst of both: the user's text is damaged and they are stopped
+    anyway. So the residual score — what remains after removing the
+    redactable classes — must fall below the warn threshold.
+
+    This is what correctly separates two cases that look alike:
+
+        "her card 4532015112830366 was double charged"
+            remove the card -> a name in an ordinary sentence -> REDACT
+
+        "our client Deborah Alvarez is threatening to sue"
+            nothing removable -> still warn-worthy -> WARN
+    """
+    candidates = removable(findings, policy)
+    if not candidates:
+        return False
+
+    # Measured over what would ACTUALLY be replaced, not over every
+    # finding. Counting spans that redaction leaves untouched inflates
+    # the figure and refuses redaction on messages it would have
+    # handled perfectly well — which is how
+    #
+    #     "send the contract to Miriam Feldstein at Halcyon Partners,
+    #      her address is m.feldstein@halcyonpartners.co"
+    #
+    # came out at 70% covered when the only span to be removed was the
+    # address, and fell back to a warning it did not need.
+    if redactor.coverage(text, candidates) > policy.max_redacted_fraction:
+        return False
+
+    remaining = [f for f in findings if f not in candidates]
+
+    return _score_of(remaining, text, policy) < policy.warn_threshold
 
 
 def _base_score(
@@ -230,15 +318,32 @@ def _combination_bonus(
     return total
 
 
-def _action_for(score: float, policy: RiskPolicy) -> Action:
+def _action_for(score: float, policy: RiskPolicy, *, redactable: bool) -> Action:
+    """Turn a score into an instruction.
+
+    Redaction is checked BEFORE blocking, which is the important
+    ordering and deserves the explanation.
+
+    Blocking is a dead end: the user is told no and left to work out
+    what to remove, which in practice means they retype the message
+    somewhere the tool cannot see it. Offering to strip the secret and
+    send the rest is both safer and more useful, so at high scores
+    redaction is the preferred remedy and `block` is what happens when
+    redaction would not help.
+
+    That is also what stops `block` from becoming vestigial. It now
+    means something specific: there is nothing in this message except
+    the thing we cannot send.
+    """
+    if (
+        policy.redact_threshold is not None
+        and score >= policy.redact_threshold
+        and redactable
+    ):
+        return Action.REDACT
+
     if score >= policy.block_threshold:
         return Action.BLOCK
-
-    # Redaction stays unreachable until 5.3 implements it. Emitting an
-    # action the extension cannot perform would leave a message neither
-    # sent nor blocked, silently.
-    if policy.redact_threshold is not None and score >= policy.redact_threshold:
-        return Action.REDACT
 
     if score >= policy.warn_threshold:
         return Action.WARN

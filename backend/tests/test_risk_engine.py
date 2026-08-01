@@ -43,22 +43,27 @@ def test_nothing_found_is_allowed():
     assert result.score == 0
 
 
-def test_a_critical_finding_blocks():
+def test_a_critical_finding_never_passes():
+    """Whether it blocks or offers redaction is policy; that it stops
+    the message is not."""
     result = assess([finding("PRIVATE_KEY", "critical", score=1.0)])
 
-    assert result.action is Action.BLOCK
+    assert result.action in (Action.BLOCK, Action.REDACT)
 
 
-def test_a_high_finding_warns_without_blocking():
-    """A payment card should stop the user, not stop the message.
+def test_a_message_that_is_nothing_but_the_secret_is_blocked():
+    """Redaction would hand the user `[REDACTED: PRIVATE_KEY]`, which
+    is a receipt rather than a message.
 
-    Blocking on everything serious sounds safer and is not: a control
-    that cannot be overridden gets routed around, and then it protects
-    nothing.
+    This is what keeps `block` meaningful instead of vestigial: it now
+    means "there is nothing here except the thing we cannot send".
     """
-    result = assess([finding("CREDIT_CARD", "high")])
+    key = "AKIAIOSFODNN7EXAMPLE"
+    result = assess(
+        [finding("AWS_ACCESS_KEY_ID", "critical", score=0.97, start=0, end=len(key))], key
+    )
 
-    assert result.action is Action.WARN
+    assert result.action is Action.BLOCK
 
 
 def test_every_entropy_finding_can_warn_and_none_can_block():
@@ -94,15 +99,16 @@ def test_a_name_plus_a_contact_address_is_sensitive():
     contactable human being — personal data under GDPR in a way that
     neither half is.
     """
+    text = "Miriam Feldstein can be reached at m.f@example.com about the contract"
     result = assess(
         [
-            finding("PERSON", "low", score=0.85, start=0, end=5),
-            finding("EMAIL", "low", score=0.95, start=20, end=35),
+            finding("PERSON", "low", score=0.85, start=0, end=16),
+            finding("EMAIL", "low", score=0.95, start=35, end=50),
         ],
-        "Miriam Feldstein can be reached at m.f@example.com about the contract",
+        text,
     )
 
-    assert result.action is Action.WARN
+    assert result.action is not Action.ALLOW
     assert any("contact" in reason for reason in result.reasons)
 
 
@@ -217,15 +223,52 @@ def test_the_score_is_clamped_to_the_declared_range():
     assert 0 <= result.score <= 100
 
 
-def test_redaction_is_unreachable_until_it_is_implemented():
-    """An action string the extension does not recognise falls through
-    every branch, leaving the message neither sent nor blocked — the
-    worst available outcome, and one that raises no error anywhere.
-    """
-    assert DEFAULT_POLICY.redact_threshold is None
+def test_redaction_is_offered_when_it_resolves_the_risk():
+    """A card inside a sentence: remove it and the question survives."""
+    text = "charge 4532015112830366 for the invoice please"
+    result = assess([finding("CREDIT_CARD", "high", start=7, end=23)], text)
 
-    for severity in ("low", "medium", "high", "critical"):
-        assert assess([finding("X", severity)]).action is not Action.REDACT
+    assert result.action is Action.REDACT
+
+
+def test_redaction_is_not_offered_when_it_would_not_resolve_the_risk():
+    """Offering to redact and stopping the user anyway is the worst of
+    both: their text is damaged AND they are still blocked.
+
+    Here nothing is removable — a marked data subject is not — so the
+    correct answer is to warn and let the human decide.
+    """
+    text = "our client Deborah Alvarez is threatening to sue over the denied claim"
+    result = assess([finding("PERSON", "low", score=0.85, start=11, end=27)], text)
+
+    assert result.action is Action.WARN
+
+
+def test_redaction_removes_only_what_the_decision_was_based_on():
+    """Regression for a message that redaction destroyed.
+
+    The decision to redact was justified by removing the EMAIL alone —
+    the residual score with the name still present was below the warn
+    threshold. Passing every finding to the redactor instead produced
+
+        "send the contract to [REDACTED: PERSON] at
+         [REDACTED: ORGANIZATION], her address is [REDACTED: EMAIL]"
+
+    which is not a redacted message, it is a destroyed one.
+    """
+    from backend.app.core import redactor, risk
+
+    text = "send the contract to Miriam Feldstein, her address is m.f@example.com"
+    findings = [
+        finding("PERSON", "low", score=0.85, start=21, end=37),
+        finding("EMAIL", "low", score=0.95, start=54, end=69),
+    ]
+
+    output = redactor.redact(text, risk.removable(findings))
+
+    assert "Miriam Feldstein" in output, "the name should have survived"
+    assert "m.f@example.com" not in output
+    assert "[REDACTED: EMAIL]" in output
 
 
 # ---------------------------------------------------------------

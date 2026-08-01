@@ -14,16 +14,20 @@ would mean running a server, paying network overhead per sample, and
 parsing JSON back into objects — slow enough that you stop rerunning
 it, and the numbers go stale.
 
-Today the body is a stub. Tasks 3.4 onward replace the marked section
-with real detectors; nothing above or below it needs to change, and
-neither does the extension.
+Sequence, as of Week 5:
+
+    regex -> entropy -> semantic -> risk fusion -> redaction
+
+Each stage is skippable and each is measured separately, which is what
+lets the report say what every one of them is worth rather than
+asserting that the pipeline as a whole works.
 """
 
 import time
 import uuid
 from dataclasses import dataclass
 
-from ..core import risk
+from ..core import redactor, risk
 from ..core.policy import DEFAULT_POLICY, RiskPolicy
 from ..detectors import entropy_detector, regex_detector, semantic_detector
 from ..detectors.base import Finding, highest_severity, resolve_overlaps
@@ -207,6 +211,23 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
 
     message = _describe(findings, action)
 
+    # ---- The one place text travels back ------------------------
+    # Populated only for `redact`, and only because what goes back is
+    # strictly SAFER than what the client already holds. Building it
+    # unconditionally "in case the UI wants it" would put a lightly
+    # transformed copy of every prompt into every HTTP log, which is
+    # the exposure this project exists to prevent.
+    # Strips exactly `risk.removable()` — the same set the decision to
+    # offer redaction was based on. Passing every finding instead would
+    # deliver a different message from the one that was approved, and
+    # would remove the names that the residual-score check had already
+    # judged safe to keep.
+    redacted_text = (
+        redactor.redact(request.text, risk.removable(findings))
+        if action is Action.REDACT
+        else None
+    )
+
     # Measured around the detection work only, excluding FastAPI's
     # request parsing and response serialisation. That keeps the number
     # comparable across the regex-only baseline and the full pipeline —
@@ -220,7 +241,7 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
         score=score,
         entities=entities,
         message=message,
-        redacted_text=None,
+        redacted_text=redacted_text,
         latency_ms=round(latency_ms, 3),
         stages_run=stages_run,
         reasons=list(result.reasons),

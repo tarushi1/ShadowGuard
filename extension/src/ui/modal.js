@@ -354,19 +354,23 @@ globalThis.SG.WarningModal = class WarningModal {
       entities = [],
       message = "This message appears to contain sensitive information.",
       preview = "",
+      redactedText = "",
       allowProceed = true,
     } = verdict ?? {};
 
     const $ = (id) => this.dialog.querySelector(id);
     const offline = variant === "offline";
+    const redact = variant === "redact";
 
     $("#sg-banner").className = `banner level-${offline ? "offline" : level}`;
 
     $("#sg-title").textContent = offline
       ? "ShadowGuard is offline"
-      : level === "critical"
-        ? "Blocked — critical content"
-        : "Sensitive content detected";
+      : redact
+        ? "Sensitive content can be removed"
+        : level === "critical"
+          ? "Blocked — critical content"
+          : "Sensitive content detected";
 
     // textContent, not innerHTML. See the note in #buildDialog().
     $("#sg-msg").textContent = message;
@@ -391,22 +395,36 @@ globalThis.SG.WarningModal = class WarningModal {
       }
     }
 
+    // For a redaction the preview shows what WILL BE SENT, not what
+    // the user typed. Showing the original here would be actively
+    // misleading: they would be approving a message they had not been
+    // shown, which is the whole thing re-confirmation exists to
+    // prevent.
     const previewEl = $("#sg-preview");
-    previewEl.textContent = preview;
-    previewEl.hidden = preview.length === 0;
+    previewEl.textContent = redact ? redactedText : preview;
+    previewEl.hidden = previewEl.textContent.length === 0;
 
     // At critical severity there is no override. That is a policy
     // decision surfaced in the UI: warn is advisory, block is not.
     const proceed = $("#sg-proceed");
     proceed.hidden = !allowProceed;
-    proceed.textContent = offline ? "Send without checking" : "Send anyway";
+    proceed.textContent = offline
+      ? "Send without checking"
+      : redact
+        ? "Send redacted"
+        : "Send anyway";
 
     // Which button is focused IS the default action, because Enter
     // activates it. For a risk warning the safe default is Cancel. In
     // the offline case the chosen policy is fail-open, so the send
     // button carries the default — the dialog's job there is to
     // inform, not to obstruct.
-    this._defaultButton = offline && allowProceed ? proceed : $("#sg-cancel");
+    //
+    // Redaction ALSO defaults to its action button, and for a reason
+    // worth stating: the proposed send is strictly safer than what the
+    // user typed. Defaulting to Cancel there would make the safe path
+    // the effortful one, and people take the effortless path.
+    this._defaultButton = (offline || redact) && allowProceed ? proceed : $("#sg-cancel");
   }
 
   /** @private */

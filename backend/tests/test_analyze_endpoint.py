@@ -134,6 +134,52 @@ def test_response_never_echoes_the_submitted_text():
     assert secret not in response_text(body)
 
 
+def test_redacted_text_is_absent_unless_the_action_is_redact():
+    """The one exception to "the server never returns text" must stay
+    an exception.
+
+    Populating this field "in case the UI wants it" would put a lightly
+    transformed copy of every prompt into every HTTP log between here
+    and the browser — the exposure this project exists to prevent,
+    reintroduced as a convenience.
+    """
+    body = client.post(ENDPOINT, json=payload("how do I sort a list")).json()
+
+    assert body["action"] == "allow"
+    assert body["redacted_text"] is None
+
+
+def test_a_redaction_removes_the_secret_and_keeps_the_sentence():
+    secret = "4532015112830366"
+    body = client.post(
+        ENDPOINT, json=payload(f"charge {secret} for the invoice please")
+    ).json()
+
+    assert body["action"] == "redact"
+    assert secret not in body["redacted_text"]
+    assert body["redacted_text"] == "charge [REDACTED: CREDIT_CARD] for the invoice please"
+
+
+def test_a_message_that_is_only_a_secret_is_blocked_not_redacted():
+    """Redaction would return `[REDACTED: ...]`, which is a receipt
+    rather than a message. This is what keeps `block` meaningful."""
+    body = client.post(ENDPOINT, json=payload("AKIAIOSFODNN7EXAMPLE")).json()
+
+    assert body["action"] == "block"
+    assert body["redacted_text"] is None
+
+
+def test_the_reasons_never_contain_a_matched_value():
+    """`reasons` is new text on the response, so it is a new way for a
+    secret to escape. It names entity types only."""
+    secret = "sk-proj-zzzTOPSECRET999"
+    body = client.post(ENDPOINT, json=payload(f"my key is {secret} please rotate it")).json()
+
+    assert body["reasons"], "a stopped message must say why"
+    for reason in body["reasons"]:
+        assert secret not in reason
+
+
 def response_text(body: dict) -> str:
     """Flatten the response to a string so we can search all of it."""
     import json

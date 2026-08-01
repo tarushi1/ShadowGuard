@@ -202,13 +202,55 @@ class RiskPolicy:
     warn_threshold: float = 25.0
     block_threshold: float = 90.0
 
-    # Redaction is not implemented until 5.3. Left as None rather than
-    # as a number, so the engine cannot emit an action the extension
-    # does not yet know how to perform — an action string that reaches
-    # the content script and matches no branch means the message is
-    # neither sent nor blocked, which is the worst outcome available
-    # and raises no error anywhere.
-    redact_threshold: float | None = None
+    # At or above this, OFFER TO REMOVE the findings rather than merely
+    # warning about them — provided the message survives it.
+    #
+    # 50 sits just below a Luhn-validated payment card (60 * 0.9 = 54),
+    # which is the canonical redactable case: one structured token
+    # inside a sentence that still means something without it.
+    #
+    # Semantic-only messages score 27-46 and therefore stay at `warn`,
+    # which falls out of the design rather than being special-cased.
+    # That is the right outcome: in "our client Deborah Alvarez is
+    # threatening to sue", the name is not an incidental token in the
+    # message, it IS the message. Redacting it produces a question
+    # nobody can answer.
+    redact_threshold: float | None = 50.0
+
+    # Redaction is only offered when at least this much of the message
+    # survives it. Someone who pastes a private key and nothing else
+    # would otherwise be handed
+    #
+    #     [REDACTED: PRIVATE_KEY]
+    #
+    # which is not a message, it is a receipt. Past this line the
+    # correct answer is `block`, and this is what keeps `block`
+    # meaningful rather than vestigial: it means "there is nothing here
+    # except the thing we cannot send".
+    max_redacted_fraction: float = 0.5
+
+    # Classes that can be removed without destroying the message.
+    #
+    # `identity` and `affiliation` are deliberately absent. A secret is
+    # INCIDENTAL to the sentence around it — "charge [REDACTED:
+    # CREDIT_CARD] for the invoice" still asks a coherent question. A
+    # person is usually the SUBJECT of the sentence, and removing them
+    # leaves nothing to answer:
+    #
+    #     "send the signed contract to [REDACTED: PERSON] at
+    #      [REDACTED: ORGANIZATION]"
+    #
+    # That is not a redacted message, it is a destroyed one, and
+    # offering it as a remedy teaches users that the redact button
+    # produces garbage.
+    #
+    # Note this does NOT mean personal data is never redacted. Removing
+    # the EMAIL from "Miriam Feldstein can be reached at [REDACTED:
+    # EMAIL]" breaks the linkability that made the pair sensitive while
+    # leaving the question intact — which is exactly the point.
+    redactable_classes: frozenset[str] = frozenset(
+        {"secret", "financial", "government_id", "contact"}
+    )
 
     # ---- Level bands --------------------------------------------
     # Score -> RiskLevel, for the modal's colour and wording. Separate
