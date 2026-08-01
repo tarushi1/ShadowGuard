@@ -31,12 +31,12 @@ It computes a risk score and decides whether to **allow**, **warn**, **redact**,
 
 | | |
 |---|---|
-| **Last updated** | 2026-08-01 |
+| **Last updated** | 2026-08-02 |
 | **Project root** | `/Users/arushitiwari/Desktop/ShadowGuard` |
-| **Git branch** | `main` (46 commits, working tree clean) |
+| **Git branch** | `main` (47 commits, working tree clean) |
 | **Current stage** | Stages 0, 1, 2 and the risk engine running end to end. **Recall 98% at 0% FPR.** |
-| **Completed** | **Weeks 1–4 complete**; 5.1 risk engine done. 2.6 deferred to Week 6. |
-| **Next task** | **5.2 — redaction** (one open decision: edit in place, or re-confirm?) |
+| **Completed** | **Weeks 1–4 complete**; 5.1 risk engine, 5.2 redaction. 2.6 deferred to Week 6. |
+| **Next task** | **5.3 — SQLAlchemy models and the SQLite schema** |
 | **Deadline** | ~2026-09-20 (8 weeks from 2026-07-26) |
 | **Weeks elapsed** | ~0.6 of 8 — **well ahead of plan** |
 
@@ -46,7 +46,7 @@ Loading `extension/` unpacked into Chrome and opening `chatgpt.com` produces, in
 
 ```
  [ShadowGuard] ACTIVE            ← green badge
-[ShadowGuard] version    : 0.8.0
+[ShadowGuard] version    : 0.9.0
 [ShadowGuard] host       : chatgpt.com
 [ShadowGuard] frame      : top-level
 [ShadowGuard] adapter    : ChatGPT (chatgpt)
@@ -67,6 +67,25 @@ A safe message replays silently and the user never knows ShadowGuard was there. 
 the Shadow-DOM modal: **Cancel** blocks and leaves the text for editing, **Send anyway** replays
 it. At `block` severity there is no override button at all.
 
+**Redaction is live.** When removing the findings would leave a usable message, the modal shows the
+exact text that will be sent and offers **Send redacted**:
+
+```
+charge 4532015112830366 for the invoice please
+        ↓
+charge [REDACTED: CREDIT_CARD] for the invoice please
+```
+
+Nothing is rewritten without the user seeing it first — silently editing someone's message and
+sending it would be a worse betrayal of trust than either warning or blocking. The placeholder
+names the entity *type* and nothing else: a partial mask like `4532 **** **** 0366` is familiar
+from banking UIs and wrong here, because the issuer prefix plus the last four digits identifies a
+card in most customer-service systems.
+
+Redaction is offered only when it actually **resolves** the risk. `our client Deborah Alvarez is
+threatening to sue` gets a plain warning instead — a person is usually the *subject* of a sentence
+rather than an incidental token in it, and redacting them leaves nothing to answer.
+
 **The extension contains zero detection logic** — every verdict comes from Python. Stage 1 is live:
 
 - **1a, regex** — 16 rules: vendor API keys, private keys, JWTs, Luhn-validated payment cards,
@@ -82,8 +101,9 @@ If the backend is unreachable, a **grey** "offline — not inspected" modal appe
 the focused default (fail open, visibly — see [D12](docs/decisions.md)).
 
 Try it: `how do I sort a list in python` sends straight through; `charge 4111 1111 1111 1111`
-warns (Luhn-validated — change the last digit and it stops warning); `deploy key
-AKIAIOSFODNN7EXAMPLE` blocks; `internal auth token Zq7Wm2Kp9Xr4Nv6Bt8Lc3Hd5Fj1Gy0Ae` warns on
+offers **redaction** (Luhn-validated — change the last digit and it stops firing); `deploy key
+AKIAIOSFODNN7EXAMPLE` offers redaction, while the bare key `AKIAIOSFODNN7EXAMPLE` alone **blocks**,
+because there would be nothing left to send; `internal auth token Zq7Wm2Kp9Xr4Nv6Bt8Lc3Hd5Fj1Gy0Ae` warns on
 entropy alone, matching no pattern. Then stop the server and send anything to see the offline path.
 
 Each request carries a `request_id` that appears in **both** the browser console and the uvicorn
@@ -103,6 +123,8 @@ __sg.stats()         // {seen, intercepted, passed} — confirms guards fire
 __sg.pending         // the held send, or null
 __sg.approve()       // stands in for the modal's "Proceed"
 __sg.discard()       // stands in for "Cancel"
+__sg.sendRedacted(s) // swap the composer text, then send
+__sg.tryReplace()    // test the composer rewrite alone — returns whether it took
 __sg.sendButton()    // where a replay would route right now
 __sg.modal           // the modal instance (its shadow root is closed — this is the only handle)
 ```
@@ -614,8 +636,8 @@ Every task is independently testable — you know it works before moving on.
 | Task | Test | Status |
 |---|---|---|
 | 5.1 Risk engine: weighted fusion, tunable policy file | Recall 89% → 98% at 0% FPR | ✅ |
-| 5.2 Redaction: `redact` action and `redacted_text` | Secret removed, rest of the message survives | ⬜ **next** |
-| 5.3 SQLAlchemy models + SQLite schema | Rows written, no prompt text stored | ⬜ |
+| 5.2 Redaction: `redact` action and `redacted_text` | Secret removed, rest of the message survives | ✅ |
+| 5.3 SQLAlchemy models + SQLite schema | Rows written, no prompt text stored | ⬜ **next** |
 | 5.4 Event logging and dashboard-ready queries | Decisions queryable by user and time | ⬜ |
 
 > **5.1 delivered the number Week 4 could not.** The Stage 1 → Stage 1+2 gap the original plan

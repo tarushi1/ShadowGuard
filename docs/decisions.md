@@ -685,6 +685,105 @@ section, alongside the corpus-saturation argument in D30.
 
 ---
 
+## D35 — Redaction re-confirms, and never edits in place
+
+**Context.** The `redact` action needs to change the user's message. Two ways to do that.
+
+| Option | Consequence |
+|---|---|
+| **Edit the composer silently, then send** | Smoother. The user never sees the substitution, and a redacted sentence can become nonsense they did not write and cannot retract. |
+| **Show it, require re-confirmation** ✅ | One extra click. The user approves the exact text that will be sent. |
+
+**Chosen: re-confirmation.** Silently rewriting somebody's message and sending it is a worse
+betrayal of trust than either warning or blocking, both of which leave the user in control of their
+own words. The modal previews the replacement and the button reads **Send redacted**.
+
+The default focus goes to that button rather than to Cancel — a deliberate inversion of the
+warning modal, where Cancel is the default. The proposed send is *strictly safer* than what the
+user typed, so defaulting to Cancel would make the safe path the effortful one, and people take the
+effortless path.
+
+---
+
+## D36 — Redaction replaces with a typed placeholder, never a partial mask
+
+**Options:**
+
+| Form | Verdict |
+|---|---|
+| `[REDACTED]` | Loses the context that makes the reply useful — the model cannot tell whether it is being asked about a key or a name |
+| `4532 **** **** 0366` | **Rejected.** Familiar from banking UIs and wrong here |
+| `[REDACTED: CREDIT_CARD]` ✅ | Names the type, leaks zero characters of the value |
+
+**Why partial masking is the dangerous one.** It *looks* like the responsible choice, which is why
+it is worth naming explicitly: the issuer prefix plus the last four digits is enough to identify a
+card in most customer-service systems, and BIN + last-four is a standard reconciliation key.
+**Partial masking is disclosure wearing redaction's clothes.**
+
+A test asserts that neither the first four nor the last four characters of a secret survive.
+
+---
+
+## D37 — Redaction is offered only when it resolves the risk
+
+**Context.** The first implementation offered redaction whenever the score cleared a threshold. It
+produced this:
+
+```
+send the contract to [REDACTED: PERSON] at [REDACTED: ORGANIZATION],
+her address is [REDACTED: EMAIL]
+```
+
+That is not a redacted message, it is a destroyed one — and offering it as a remedy teaches users
+that the redact button produces garbage.
+
+**Chosen: two conditions, both required.**
+
+1. **Something must be left to say.** Coverage of the spans that would actually be replaced must
+   stay under 50%. Someone who pastes a private key and nothing else would otherwise be handed
+   `[REDACTED: PRIVATE_KEY]`, which is a receipt rather than a message.
+2. **Redaction must resolve, not merely reduce.** The *residual* score — recomputed over what would
+   remain — must fall below the warn threshold. Offering to redact and stopping the user anyway is
+   the worst of both: their text is damaged **and** they are still blocked.
+
+Plus a class rule: `identity` and `affiliation` are **not redactable**. A secret is *incidental* to
+the sentence around it; a person is usually the *subject* of it. This does not mean personal data
+is never redacted — removing the `EMAIL` from *"Miriam Feldstein can be reached at [REDACTED:
+EMAIL]"* breaks the linkability that made the pair sensitive while leaving the question intact.
+
+**Consequence: `block` becomes meaningful rather than vestigial.** It now means something specific
+— *there is nothing in this message except the thing we cannot send.* Redaction is checked before
+blocking, because blocking is a dead end that in practice sends people to retype the message
+somewhere the tool cannot see it.
+
+**A bug this exposed.** Coverage was first measured over *every* finding rather than over the spans
+that would actually be replaced, so a message came out 70% covered when only the email address was
+to be removed, and fell back to a warning it did not need.
+
+---
+
+## D38 — `approve()` and `discard()` were missing from `main`
+
+**Not a decision — a defect, recorded because the failure mode is worth learning from.**
+
+`git log -S 'function approve'` shows both functions added in `9a85fcc` and removed in `c45de5f`
+("connect the extension to the FastAPI backend"), while six call sites survived.
+
+**Why nothing caught it.** The extension has no automated tests, and the file *parses* — a
+`ReferenceError` for an undeclared identifier is a runtime error. `window.__sg` is built with
+`approve` as a shorthand property, so constructing it threw, `__sg` was never assigned, and every
+held send became unreplayable. The symptom was `__sg is not defined` in the console, which had
+already been attributed to the well-known DevTools console-context trap — a correct explanation for
+a different occurrence, which is exactly how a real bug hides behind a known one.
+
+**Restored in 5.2**, found while wiring the redaction path through the same functions.
+
+**The lesson for the report:** the Python side has 181 tests and the extension has none, and this is
+the first defect that gap has actually cost. Test coverage that stops at a language boundary leaves
+the other side of the boundary unprotected, no matter how good the numbers look on the tested half.
+
+---
+
 ## Still open
 
 | Question | Decide by |

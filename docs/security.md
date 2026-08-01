@@ -34,6 +34,8 @@ Tracked deliberately. Each is either fixed, scheduled, or accepted with reasonin
 | B6 | **Client-supplied `user_id`.** Anyone can send any id, so behavioural profiles can be poisoned or evaded. | Prototype limitation; real deployment uses authenticated identity |
 | B7 | **Uninstalling the extension.** | Enterprise deployments use forced-install policy; out of scope here |
 | B8 | **Context starvation.** `INDIA_AADHAAR` and `INDIA_PAN` only fire when a supporting word appears within 50 characters ([D29](decisions.md)), so pasting the bare number with no surrounding words evades both. | **Accepted, and it is the price of the gate** — see below |
+| B9 | **Edit during re-confirmation.** The composer stays editable while the redaction modal is open, so a user can approve `[REDACTED: CREDIT_CARD]` and have different text sent. A variant of B1, and worse: the approval was for text the user was explicitly shown. | Mitigated — `sendRedacted()` overwrites the composer rather than trusting it, then **re-reads and abandons the send** if the replacement did not take |
+| B10 | **Redaction as an oracle.** A sender can learn exactly which spans are detected by watching what gets replaced, then rephrase until nothing is. | **Inherent to any visible control.** Warning and blocking leak the same information more slowly. Noted rather than mitigated |
 
 ### On B8 — a bypass that was bought deliberately
 
