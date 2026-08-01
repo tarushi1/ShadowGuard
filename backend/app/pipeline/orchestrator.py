@@ -23,6 +23,8 @@ import time
 import uuid
 from dataclasses import dataclass
 
+from ..core import risk
+from ..core.policy import DEFAULT_POLICY, RiskPolicy
 from ..detectors import entropy_detector, regex_detector, semantic_detector
 from ..detectors.base import Finding, highest_severity, resolve_overlaps
 from ..schemas.analyze import (
@@ -33,29 +35,6 @@ from ..schemas.analyze import (
     RiskLevel,
 )
 
-# ---------------------------------------------------------------
-# Severity → verdict
-# ---------------------------------------------------------------
-# PLACEHOLDER, replaced by the real risk engine in Week 5.
-#
-# Today the verdict is simply the worst severity found. That is a
-# reasonable Stage-1 policy — a private key is a private key — but it
-# cannot weigh evidence: two medium signals plus unusual behaviour
-# should outrank one medium signal, and this cannot express that.
-# Week 5 turns it into weighted fusion over all stages.
-#
-# Kept as data rather than an if-chain so the eventual replacement has
-# something concrete to compare against in the report.
-_SEVERITY_VERDICT: dict[str, tuple[Action, RiskLevel, int]] = {
-    "critical": (Action.BLOCK, RiskLevel.CRITICAL, 95),
-    "high": (Action.WARN, RiskLevel.HIGH, 75),
-    "medium": (Action.WARN, RiskLevel.MEDIUM, 50),
-    "low": (Action.ALLOW, RiskLevel.LOW, 20),
-}
-
-_NOTHING_FOUND = (Action.ALLOW, RiskLevel.LOW, 0)
-
-
 @dataclass(frozen=True)
 class StageResult:
     """What the detection stages concluded, before HTTP gets involved."""
@@ -65,6 +44,11 @@ class StageResult:
     score: int
     findings: list[Finding]
     stages_run: list[str]
+    reasons: tuple[str, ...] = ()
+    """Human-readable justifications from the risk engine.
+
+    A verdict nobody can explain is a verdict nobody will trust.
+    """
 
 
 def run_stages(
@@ -72,6 +56,7 @@ def run_stages(
     *,
     use_entropy: bool = True,
     use_semantic: bool = True,
+    policy: RiskPolicy = DEFAULT_POLICY,
 ) -> StageResult:
     """Run the detection stages and fuse them into a verdict.
 
@@ -89,6 +74,8 @@ def run_stages(
     :param text: content to inspect
     :param use_entropy: run Stage 1b (entropy)
     :param use_semantic: run Stage 2 (Presidio NER)
+    :param policy: risk-scoring opinions; the harness varies this to
+        report what a threshold change would actually cost
     """
     stages_run: list[str] = ["regex"]
 
@@ -126,16 +113,20 @@ def run_stages(
         stages_run.append("semantic")
         findings = _merge_semantic(findings, semantic_detector.scan(text))
 
-    action, level, score = _SEVERITY_VERDICT.get(
-        highest_severity(findings), _NOTHING_FOUND
-    )
+    # ---- Fusion --------------------------------------------------
+    # Where "what did we find" becomes "what should happen". Kept in
+    # its own module because it is the one part of this pipeline whose
+    # correct answer is an organisational choice rather than a
+    # technical fact — see core/policy.py.
+    assessment = risk.assess(findings, text, policy)
 
     return StageResult(
-        action=action,
-        level=level,
-        score=score,
+        action=assessment.action,
+        level=assessment.level,
+        score=assessment.score,
         findings=findings,
         stages_run=stages_run,
+        reasons=assessment.reasons,
     )
 
 
@@ -232,6 +223,7 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
         redacted_text=None,
         latency_ms=round(latency_ms, 3),
         stages_run=stages_run,
+        reasons=list(result.reasons),
     )
 
 

@@ -52,7 +52,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from .base import Finding, highest_severity, resolve_overlaps  # noqa: F401
+from .base import Finding, context_window, highest_severity, resolve_overlaps  # noqa: F401
 
 DETECTOR_NAME = "regex"
 
@@ -373,12 +373,7 @@ def has_supporting_context(text: str, start: int, end: int, rule_name: str) -> b
     if pattern is None:  # ungated rule — nothing to satisfy
         return True
 
-    before = text[max(0, start - _CONTEXT_WINDOW) : start]
-    after = text[end : end + _CONTEXT_WINDOW]
-
-    # Joined with a space so a word cut in half at one edge cannot
-    # accidentally join a fragment at the other and match.
-    return pattern.search(f"{before} {after}") is not None
+    return pattern.search(context_window(text, start, end, _CONTEXT_WINDOW)) is not None
 
 
 # ---------------------------------------------------------------

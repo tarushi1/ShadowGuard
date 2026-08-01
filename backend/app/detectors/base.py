@@ -92,6 +92,32 @@ class Finding:
 SEVERITY_ORDER: dict[str, int] = {"low": 0, "medium": 1, "high": 2, "critical": 3}
 
 
+def context_window(text: str, start: int, end: int, radius: int) -> str:
+    """The text surrounding a span, with the span itself removed.
+
+    Shared by two callers that ask opposite questions of it:
+
+      - `regex_detector` GATES on it — a weak pattern only counts if a
+        supporting word is nearby (D29)
+      - `core.risk` AMPLIFIES on it — a person named as a data subject
+        weighs more than a person mentioned as a topic
+
+    Excluding the span is what both depend on. Include it, and a match
+    can supply its own justification: a PAN whose letters spell `PAN`
+    would validate itself, and a finding could raise its own weight. A
+    check the sender can satisfy by choosing a convenient value is not
+    a check.
+
+    The two halves are joined with a space so a word truncated at one
+    edge cannot fuse with a fragment at the other and match something
+    that was never written.
+    """
+    before = text[max(0, start - radius) : start]
+    after = text[end : end + radius]
+
+    return f"{before} {after}"
+
+
 def resolve_overlaps(findings: list[Finding]) -> list[Finding]:
     """Keep the strongest finding where several cover the same text.
 

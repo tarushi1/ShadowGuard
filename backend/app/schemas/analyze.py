@@ -187,3 +187,15 @@ class AnalyzeResponse(BaseModel):
             "Stage 2, and this field is the evidence."
         ),
     )
+
+    reasons: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Why the risk engine reached this score, in plain language. "
+            "A score nobody can explain is a score nobody will trust: when a "
+            "user asks why their message was stopped, 'score 61' is not an "
+            "answer and 'a name together with a way to contact them' is. "
+            "Names entity TYPES only and never matched values, for the same "
+            "reason `entities` carries offsets rather than text."
+        ),
+    )

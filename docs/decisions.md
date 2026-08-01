@@ -596,6 +596,97 @@ measurably worse than others. It is reported in the ethics section as a result, 
 a caveat. Group G3 existed in the specification *specifically* to measure a weakness in a component
 we chose, which is why the number exists at all.
 
+---
+
+## D33 — The risk engine scores by weighted fusion, not by counting
+
+**Context.** The Week 3 placeholder took the worst single severity as the verdict. On the
+200-sample corpus it allowed 11 sensitive messages through, and **8 of those had completely correct
+detection** — every expected entity found, message allowed anyway, because `PERSON` and
+`ORGANIZATION` are `low` and `low` means `allow` (D32).
+
+A max-severity policy can only answer *"what is the worst single thing here?"*. It cannot express
+*"a name plus an employer plus a working email address is a customer record, even though no one of
+those three is sensitive."*
+
+**The option that had to be rejected first.** Warn on two-or-more findings. Measured before
+building anything else:
+
+| | |
+|---|---|
+| catches | 8 of the 11 misses |
+| costs | **13 benign false positives** |
+
+Including `explain how Satya Nadella restructured Microsoft` and `compare the leadership styles of
+Jacinda Ardern and Angela Merkel`. **Counting findings is not fusion** — those messages contain the
+same entity types as the ones that should be stopped.
+
+**Chosen:** a score from three components, with every number in a separate `core/policy.py`:
+
+1. **Weighted sum**, `severity_weight × confidence`, with `decay^n` for repeats of one type — so
+   ten addresses in a mailing list stay one fact rather than becoming ten.
+2. **Combination bonuses** over entity *classes*, not types. `identity + contact` is the important
+   one: a name identifies nobody in particular, an email address identifies nobody in particular,
+   and together they are a specific contactable human being.
+3. **Data-subject amplification** — a `PERSON` near words like `client`, `patient`, `candidate`,
+   `performance review` weighs 4× more. This is D29's used-vs-discussed distinction one level up:
+   *is this person a subject of our records, or a topic of our conversation?*
+
+**Result: recall 89% → 98% at 0% false-positive rate.** It also produced the Stage 1 → Stage 1+2
+delta that Week 4's plan promised and could not deliver: **+9 recall points**, visible at last
+because the engine can finally act on `low` findings.
+
+**Two errors caught by measurement, both fixed by principle rather than by tuning:**
+
+- **`medium` weight of 35 lost two true positives.** Entropy confidence runs 0.50–0.85, so
+  `35 × confidence` put the warn line at 0.71 — through the middle of that distribution. The fix
+  came from D19's stated intent (*warn but never block*), which is a solvable constraint:
+  `w × 0.50 ≥ 25` and `w × 0.85 < 90` gives **w ≥ 50**. *A weight not derived from a stated intent
+  will cut some distribution in half, and you will not know which one until it costs you
+  something.*
+- **Amplifying `ORGANIZATION` produced a false positive**: `our test fixtures all use Foo
+  Barrington as the customer name`. A data subject is a **natural person**; organisations and
+  places are not. Restricting amplification to `identity` was a definitional correction, and it
+  removed the false positive without touching a threshold.
+
+**Remaining false negatives, both honest:**
+
+- `S081` — *"we are acquiring Silverbrook Analytics next quarter"*. Material non-public information
+  with no person in it. **Confidential business information is a category this system does not
+  model**, and no amount of PII tuning would reach it.
+- `S098` — spaCy labelled `Meenakshi Balasubramanian` as `NRP` rather than `PERSON`, so the
+  identity+contact combination never fired. The non-Western-name weakness from D32, now costing a
+  real miss rather than only an entity-level score.
+
+---
+
+## D34 — Data-subject markers are a documented threat to validity
+
+**Context.** D33's amplification rule depends on a vocabulary of relationship words — `client`,
+`patient`, `candidate`, `performance review`, `redundancy`.
+
+**The problem, stated rather than hidden.** The corpus samples and this word list were written by
+the same author. Measuring the rule on that corpus is partly measuring whether the author is
+consistent with themselves. No amount of care removes that.
+
+**Why it was still chosen.** The alternative — refusing any lexical rule — would be inconsistent
+with D29, which accepted exactly this reasoning for Aadhaar and PAN. Two mitigations make it
+defensible rather than merely convenient:
+
+- The list is drawn from a **real domain vocabulary** — HR, support, clinical and compliance record
+  language — not from inspecting which samples failed.
+- It is **deliberately broader than the corpus needs**. `policyholder`, `beneficiary`, `grievance`
+  and `offboarding` match no sample. That breadth is evidence the list was written from the domain
+  rather than fitted to the data, and it is checkable by anyone.
+
+**Consequence.** The measured benefit of this rule is **optimistic**, and validating it properly
+requires prompts this project did not write. That belongs in the report's threats-to-validity
+section, alongside the corpus-saturation argument in D30.
+
+---
+
+## Still open
+
 | Question | Decide by |
 |---|---|
 | Dashboard: React vs Flask + Jinja | Week 6 |

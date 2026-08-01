@@ -33,10 +33,10 @@ It computes a risk score and decides whether to **allow**, **warn**, **redact**,
 |---|---|
 | **Last updated** | 2026-08-01 |
 | **Project root** | `/Users/arushitiwari/Desktop/ShadowGuard` |
-| **Git branch** | `main` (45 commits, working tree clean) |
-| **Current stage** | Stages 0, 1 and 2 running end to end, evaluated at action **and** entity level. |
-| **Completed** | **Weeks 1–4 complete**. 2.6 deferred to Week 6. |
-| **Next task** | **Week 5 — risk engine; 11 points of recall are waiting on it ([D32](docs/decisions.md))** |
+| **Git branch** | `main` (46 commits, working tree clean) |
+| **Current stage** | Stages 0, 1, 2 and the risk engine running end to end. **Recall 98% at 0% FPR.** |
+| **Completed** | **Weeks 1–4 complete**; 5.1 risk engine done. 2.6 deferred to Week 6. |
+| **Next task** | **5.2 — redaction** (one open decision: edit in place, or re-confirm?) |
 | **Deadline** | ~2026-09-20 (8 weeks from 2026-07-26) |
 | **Weeks elapsed** | ~0.6 of 8 — **well ahead of plan** |
 
@@ -117,15 +117,20 @@ console filter is set to **Verbose**.
 
 ```
   metric                regex only       stage 1   stage 1 + 2
-  recall                    76.0%         89.0%         89.0%
+  recall                    76.0%         89.0%         98.0%
   false-positive             0.0%          0.0%          0.0%
   precision                100.0%        100.0%        100.0%
-  F1                        86.4%         94.2%         94.2%
-  latency p95             0.019ms       0.020ms       3.695ms
+  F1                        86.4%         94.2%         99.0%
+  latency p95             0.021ms       0.022ms       3.630ms
 ```
 
-**Entropy buys 13 points of recall at no false-positive cost.** Still the one clean claim in the
-action-level table.
+**Entropy buys 13 points of recall, Stage 2 buys a further 9, and neither costs a single false
+positive.**
+
+That Stage 2 delta is the number Week 4's plan promised and could not produce. It exists now
+because the **Week 5 risk engine** can act on `low`-severity findings; before it, semantic
+detection was structurally incapable of changing any action-level metric
+([D31](docs/decisions.md)).
 
 > **Comparison with the v1 (150-sample) corpus**, kept verbatim rather than replaced, because the
 > corpus changed between them and a number that moves for that reason must not be presented as
@@ -143,9 +148,9 @@ action-level table.
 > predictions recorded in advance. **Three of the six were wrong**, and the grading is in §7 of
 > that document.
 
-#### The finding that shapes Week 5: detection is not the limiter
+#### How the risk engine found those 9 points
 
-Recall is 89%. Eleven sensitive messages were allowed through. Look at what happened to one:
+Before Week 5, eleven sensitive messages were allowed through. Look at what happened to one:
 
 ```
 FALSE NEGATIVE  S076   "draft a termination letter for Marcus Delgado, our
@@ -159,12 +164,38 @@ FALSE NEGATIVE  S076   "draft a termination letter for Marcus Delgado, our
 message went through because `PERSON` and `ORGANIZATION` are `low` severity, and `low` means
 `allow` ([D27](docs/decisions.md)).
 
-That turns Week 5 from "build a risk engine" into a measured target: **11 points of recall are
-recoverable by severity policy alone, with no change to any detector.**
+**Detection was never the limiter — policy was.** 11 points of recall were recoverable without
+changing a single detector.
 
-An unplanned case fell out of the same run — `name + employer + working email address` is
-currently **allowed**, because each finding is individually low severity. Under GDPR that is
-unambiguously personal data.
+The obvious fix is wrong, and measuring it *before* building anything is what kept it out. Warning
+on two-or-more findings catches 8 of the 11 **and costs 13 benign false positives**, including
+`explain how Satya Nadella restructured Microsoft`. Counting findings is not fusion; those messages
+contain the same entity types as the ones that should be stopped.
+
+What separates them is whether the person is a **data subject** or a **topic**:
+
+| | |
+|---|---|
+| `our client Deborah Alvarez is threatening to sue…` | **warn**, score 40 |
+| `explain how Satya Nadella restructured Microsoft` | **allow**, score 20 |
+
+Same entity types, same severities, opposite verdicts — decided by the relationship language around
+the name. This is [D29](docs/decisions.md)'s *used vs discussed* distinction applied one level up,
+to fusion instead of detection. Reasoning in [D33](docs/decisions.md); every weight and threshold
+lives in [`backend/app/core/policy.py`](backend/app/core/policy.py), so a policy change is not a
+code change.
+
+The engine also returns **why**, in plain language — `"a name together with a way to contact them"`
+— because a score nobody can explain is a score nobody will trust.
+
+**Two false negatives remain, both honest:**
+
+- `S081` *"we are acquiring Silverbrook Analytics next quarter"* — material non-public information
+  with no person in it. **Confidential business information is a category this system does not
+  model**, and no PII tuning would reach it.
+- `S098` — spaCy labelled `Meenakshi Balasubramanian` as `NRP` rather than `PERSON`, so the
+  identity + contact rule never fired. The non-Western-name weakness below, now costing a real
+  miss rather than only an entity-level score.
 
 #### Entity-level metrics — where Stage 2 finally becomes visible
 
@@ -578,9 +609,24 @@ Every task is independently testable — you know it works before moving on.
 > immediately. See **[D31](docs/decisions.md)** and
 > **[the pre-registered specification](evaluation/corpus-spec-v2.md)**.
 
-### Week 5 — Stage 5 + persistence
-Risk engine (weighted fusion, tunable config file) · thresholds → allow/warn/redact/block ·
-redaction implementation · SQLAlchemy models · SQLite schema · event logging · latency measurement.
+### Week 5 — Risk engine + persistence
+
+| Task | Test | Status |
+|---|---|---|
+| 5.1 Risk engine: weighted fusion, tunable policy file | Recall 89% → 98% at 0% FPR | ✅ |
+| 5.2 Redaction: `redact` action and `redacted_text` | Secret removed, rest of the message survives | ⬜ **next** |
+| 5.3 SQLAlchemy models + SQLite schema | Rows written, no prompt text stored | ⬜ |
+| 5.4 Event logging and dashboard-ready queries | Decisions queryable by user and time | ⬜ |
+
+> **5.1 delivered the number Week 4 could not.** The Stage 1 → Stage 1+2 gap the original plan
+> called "the single most important number in the report" is **+9 recall points**, and it only
+> became measurable once the engine could act on `low`-severity findings. See
+> [D33](docs/decisions.md).
+>
+> **One decision is still open for 5.2:** whether `redact` edits the composer in place or requires
+> the user to re-confirm the edited text. `redact_threshold` is deliberately `None` until then —
+> emitting an action the extension cannot perform would leave a message neither sent nor blocked,
+> silently.
 
 ### Week 6 — Stage 3 (OCR) + Gemini adapter
 Tesseract · image preprocessing (where OCR accuracy is won or lost) · feeding OCR text back
