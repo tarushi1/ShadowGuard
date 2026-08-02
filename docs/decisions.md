@@ -784,6 +784,56 @@ the other side of the boundary unprotected, no matter how good the numbers look 
 
 ---
 
+## D39 — Writing to someone else's editor, and four wrong fixes
+
+**The hardest DOM problem in the project**, and the debugging is more valuable than the fix.
+
+**Symptom.** Redaction reported success and ChatGPT received the original card number.
+
+**Why it was hard to see.** `element.innerText` showed the redacted text, so every check agreed
+with itself. ProseMirror keeps its own document model and treats the DOM as a *rendering* of it;
+ChatGPT sends from the model. The DOM said `[REDACTED: CREDIT_CARD]` and the model said `4532…`.
+
+**The four attempts, and what each got wrong:**
+
+| # | Fix | Why it failed |
+|---|---|---|
+| 1 | `execCommand("insertText")` after setting a Range | Verified by reading `innerText` — **the same layer it had just written to** |
+| 2 | Synthetic `paste` with a `DataTransfer` | Right input path, but the selection never reached the editor, so it **appended** |
+| 3 | Added `execCommand("selectAll")` + a frame yield | Still appended. Still no measurement of whether the selection took |
+| 4 | `selectAllChildren` + explicit `selectionchange` + instrumentation | ✅ selection covered 46 of 46 chars |
+
+**The root cause.** ProseMirror's `DOMObserver` syncs the editor's selection from the document's
+`selectionchange` event, which is delivered **asynchronously**. Setting a selection and dispatching
+the paste in one synchronous block means the paste arrives while the editor still believes the
+cursor is collapsed at the end — so it inserts there. Three attempts produced:
+
+```
+charge 4532015112830366 for the invoice please
+charge [REDACTED: CREDIT_CARD] for the invoice please
+charge [REDACTED: CREDIT_CARD] for the invoice please
+charge [REDACTED: CREDIT_CARD] for the invoice please
+```
+
+**The actual lesson, and it is not about ProseMirror.** Attempts 1–3 were all reasoning about how
+the editor *should* behave. Attempt 4 measured what it *did* — one number, "how many characters
+does the selection cover" — and the answer was immediate and unambiguous. **The instrumentation
+should have come first.** Three fixes were spent on a hypothesis that one log line would have
+falsified.
+
+**What held throughout.** The verification added after attempt 1 — re-read on a later frame, and
+check that the *secret is gone* rather than that the placeholder is present — caught every one of
+these failures and abandoned the send. **The card number was never transmitted across four broken
+implementations.** That is the whole argument for verifying an action rather than assuming it
+worked, and it is worth stating in the report exactly that way.
+
+**One correctness detail worth keeping.** There is deliberately no `element.textContent = text`
+fallback. It writes to the DOM without going through any input path, so the model is *guaranteed*
+untouched — the box looks perfect and the app sends the original. **A fallback that fails
+convincingly is worse than no fallback**, because the caller cannot distinguish it from success.
+
+---
+
 ## Still open
 
 | Question | Decide by |

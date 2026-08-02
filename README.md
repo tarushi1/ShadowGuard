@@ -31,9 +31,9 @@ It computes a risk score and decides whether to **allow**, **warn**, **redact**,
 
 | | |
 |---|---|
-| **Last updated** | 2026-08-02 |
+| **Last updated** | 2026-08-03 |
 | **Project root** | `/Users/arushitiwari/Desktop/ShadowGuard` |
-| **Git branch** | `main` (47 commits, working tree clean) |
+| **Git branch** | `main` (52 commits, working tree clean) |
 | **Current stage** | Stages 0, 1, 2 and the risk engine running end to end. **Recall 98% at 0% FPR.** |
 | **Completed** | **Weeks 1–4 complete**; 5.1 risk engine, 5.2 redaction. 2.6 deferred to Week 6. |
 | **Next task** | **5.3 — SQLAlchemy models and the SQLite schema** |
@@ -46,7 +46,7 @@ Loading `extension/` unpacked into Chrome and opening `chatgpt.com` produces, in
 
 ```
  [ShadowGuard] ACTIVE            ← green badge
-[ShadowGuard] version    : 0.9.0
+[ShadowGuard] version    : 0.9.3
 [ShadowGuard] host       : chatgpt.com
 [ShadowGuard] frame      : top-level
 [ShadowGuard] adapter    : ChatGPT (chatgpt)
@@ -124,7 +124,8 @@ __sg.pending         // the held send, or null
 __sg.approve()       // stands in for the modal's "Proceed"
 __sg.discard()       // stands in for "Cancel"
 __sg.sendRedacted(s) // swap the composer text, then send
-__sg.tryReplace()    // test the composer rewrite alone — returns whether it took
+__sg.tryReplace()    // diagnose the composer rewrite — reports selection coverage
+__sg.clear()         // empty the composer
 __sg.sendButton()    // where a replay would route right now
 __sg.modal           // the modal instance (its shadow root is closed — this is the only handle)
 ```
