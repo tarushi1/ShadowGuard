@@ -316,7 +316,7 @@
           }
 
           element.dispatchEvent(new Event("input", { bubbles: true }));
-          return element.value === text;
+          return { ok: element.value === text, path: "native-setter", selected: -1 };
         }
 
         // ---- contenteditable (ProseMirror) -------------------
@@ -343,28 +343,33 @@
         // API works on a plain contenteditable where execCommand may
         // be unavailable.
         const selection = window.getSelection();
-        const range = document.createRange();
-        range.selectNodeContents(element);
         selection.removeAllRanges();
-        selection.addRange(range);
+        selection.selectAllChildren(element);
 
-        document.execCommand("selectAll", false, null);
-
-        // Yield a frame so `selectionchange` can be delivered and the
-        // editor's own selection can catch up with the DOM's.
+        // ProseMirror's DOMObserver updates the editor's own selection
+        // when it sees a `selectionchange` on the document. A range set
+        // programmatically does fire one, but asynchronously — so nudge
+        // it explicitly as well, then yield a frame for delivery.
+        document.dispatchEvent(new Event("selectionchange"));
         await new Promise((resolve) => requestAnimationFrame(resolve));
+
+        // How much text the selection actually covers. This is the
+        // number that matters: if it is 0, the editor is about to
+        // insert at a collapsed cursor and APPEND rather than replace,
+        // which is precisely the bug that produced a composer holding
+        // the original message plus three copies of the redaction.
+        const selected = String(window.getSelection() ?? "").length;
 
         // ATTEMPT 1 — a synthetic paste.
         //
-        // Paste is a FIRST-CLASS input path for ProseMirror: it
-        // registers a handler and routes the content through its own
-        // transaction pipeline, which is the only way the model
-        // actually changes. Writing to the DOM and hoping the editor
-        // notices is the approach that failed.
+        // Paste is a FIRST-CLASS input path for ProseMirror: it routes
+        // content through the editor's own transaction pipeline, which
+        // is the only way the model actually changes. Writing to the
+        // DOM and hoping the editor notices does not work.
         //
         // dispatchEvent returns false when a listener called
-        // preventDefault — so `handled === true` here means ProseMirror
-        // took the paste, which is precisely the signal we want.
+        // preventDefault, so `handled === true` means the editor took
+        // it.
         const transfer = new DataTransfer();
         transfer.setData("text/plain", text);
 
@@ -377,27 +382,40 @@
         );
 
         // ATTEMPT 2 — execCommand on the same selection.
-        //
-        // Deprecated, and still works on plain contenteditables and on
-        // some editor versions. Only tried when the paste was ignored.
+        let path = handled ? "paste" : "execCommand";
         if (!handled) document.execCommand("insertText", false, text);
 
-        // Deliberately NOT falling back to `element.textContent = text`.
+        // ATTEMPT 3 — the selection never took, so the write above
+        // appended. Undo it by cutting the composer back to just the
+        // replacement, using the editing pipeline rather than the DOM.
         //
-        // That writes to the DOM without going through any input path,
-        // so the editor's model is untouched — the box shows the
-        // redacted text and the app sends the original. A fallback that
-        // produces a convincing-looking failure is worse than no
-        // fallback, because the caller cannot tell it apart from
+        // Deliberately NOT `element.textContent = text`. That writes to
+        // the DOM without going through any input path, so the model is
+        // guaranteed untouched — the box looks right and the app sends
+        // the original. A fallback that fails convincingly is worse
+        // than no fallback, because the caller cannot tell it from
         // success.
-        //
-        // The return value is DOM evidence only, which is all an
-        // isolated-world content script can observe. The caller must
-        // still re-check on a later frame — see sendRedacted().
-        return this.readText(element).includes(text.slice(0, 24));
+        const after = this.readText(element);
+        if (after.trim() !== text.trim() && text !== "") {
+          path += "+retry";
+          selection.removeAllRanges();
+          selection.selectAllChildren(element);
+          document.dispatchEvent(new Event("selectionchange"));
+          await new Promise((resolve) => requestAnimationFrame(resolve));
+          document.execCommand("insertText", false, text);
+        }
+
+        // DOM evidence only, which is all an isolated-world content
+        // script can observe. The caller must still re-check on a later
+        // frame — see sendRedacted().
+        return {
+          ok: this.readText(element).trim() === text.trim(),
+          path,
+          selected,
+        };
       } catch (error) {
         console.error("[ShadowGuard] replaceText failed:", error);
-        return false;
+        return { ok: false, path: "threw", selected: -1 };
       }
     },
   });

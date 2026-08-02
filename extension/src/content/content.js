@@ -490,7 +490,7 @@
      */
     async tryReplace(text = "[REDACTED: TEST]") {
       const before = adapter.readText(composer);
-      await adapter.replaceText(composer, text);
+      const write = await adapter.replaceText(composer, text);
       const immediate = adapter.readText(composer);
 
       await new Promise((resolve) =>
@@ -502,13 +502,19 @@
         before,
         immediate,
         settled,
-        wroteToDom: immediate.includes(text),
-        survived: settled.includes(text),
+        // The number that diagnoses the append bug. If the selection
+        // covers 0 characters, the editor inserts at a collapsed
+        // cursor and the old text survives in front of the new.
+        selectedChars: write.selected,
+        path: write.path,
+        replaced: settled.trim() === text.trim(),
+        appended: settled.includes(before.trim()) && before.trim() !== "",
       };
 
       console.log(
-        `${TAG} replace diagnosis — DOM write ${result.wroteToDom ? "OK" : "FAILED"}, ` +
-        `survived reconciliation ${result.survived ? "OK" : "NO (editor reverted it)"}`,
+        `${TAG} replace diagnosis — ` +
+        `selection covered ${result.selectedChars} chars, via ${result.path}, ` +
+        `${result.replaced ? "REPLACED correctly" : result.appended ? "APPENDED (bug)" : "unclear"}`,
         result
       );
 
