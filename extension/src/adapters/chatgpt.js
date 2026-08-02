@@ -300,7 +300,7 @@
      * @param {string} text
      * @returns {boolean} whether the write appears to have taken
      */
-    replaceText(element, text) {
+    async replaceText(element, text) {
       if (!element) return false;
 
       try {
@@ -322,11 +322,37 @@
         // ---- contenteditable (ProseMirror) -------------------
         element.focus();
 
+        // ---- Select the existing content, then WAIT ----------
+        // The waiting is the part that was missing, and its absence
+        // produced the ugliest bug in the project: instead of
+        // replacing, every attempt APPENDED, so the composer grew a
+        // copy of the message each time while the original stayed at
+        // the front.
+        //
+        // ProseMirror does not read the DOM selection when it handles
+        // an input event — it keeps its own selection state and syncs
+        // it from the `selectionchange` event, which fires on the NEXT
+        // task rather than synchronously. Setting the selection and
+        // dispatching the paste in one block means the paste arrives
+        // while the editor still believes the cursor is collapsed at
+        // the end of the document, so it inserts there.
+        //
+        // Both mechanisms are used because they fail differently:
+        // execCommand goes through the browser's editing pipeline and
+        // is what the editor is built to observe, while the Selection
+        // API works on a plain contenteditable where execCommand may
+        // be unavailable.
         const selection = window.getSelection();
         const range = document.createRange();
         range.selectNodeContents(element);
         selection.removeAllRanges();
         selection.addRange(range);
+
+        document.execCommand("selectAll", false, null);
+
+        // Yield a frame so `selectionchange` can be delivered and the
+        // editor's own selection can catch up with the DOM's.
+        await new Promise((resolve) => requestAnimationFrame(resolve));
 
         // ATTEMPT 1 — a synthetic paste.
         //

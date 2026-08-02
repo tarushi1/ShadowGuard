@@ -361,7 +361,7 @@
 
     const original = pending.text;
 
-    adapter.replaceText(composer, replacement);
+    await adapter.replaceText(composer, replacement);
 
     // ---- Verify on a LATER FRAME, not immediately ---------------
     // The first version checked straight away and reported success on
@@ -389,13 +389,22 @@
     const actual = adapter.readText(composer);
 
     if (actual === original || actual.trim() !== replacement.trim()) {
+      // Deliberately does NOT claim the composer holds the original.
+      //
+      // The first version of this message said exactly that, and it
+      // was wrong: a partial edit can leave the box holding the
+      // original AND fragments of the replacement, which is neither
+      // state. Telling a user their text is intact when it is not is
+      // worse than telling them nothing, because they will send it
+      // without looking.
       console.error(
         `%c ${TAG} REDACTION FAILED — SEND ABANDONED `,
         "background:#a11; color:#fff; padding:2px 6px; border-radius:3px;",
         `\n  wanted : ${replacement}` +
         `\n  found  : ${actual}` +
-        `\n  The editor did not accept the replacement. The original text is ` +
-        `still in the composer and has NOT been sent.`
+        `\n\n  Nothing was sent. The composer may now hold a partial or ` +
+        `duplicated edit — CHECK IT before sending anything.` +
+        `\n  Run __sg.clear() to empty it.`
       );
       pending = null;
       return false;
@@ -460,6 +469,12 @@
     /** Modal "Send redacted" — swap the composer's text, then send. */
     sendRedacted,
 
+    /** Empty the composer. For cleaning up after a failed rewrite. */
+    async clear() {
+      await adapter.replaceText(composer, "");
+      return adapter.readText(composer);
+    },
+
     /**
      * Diagnose the composer rewrite without sending anything.
      *
@@ -475,7 +490,7 @@
      */
     async tryReplace(text = "[REDACTED: TEST]") {
       const before = adapter.readText(composer);
-      adapter.replaceText(composer, text);
+      await adapter.replaceText(composer, text);
       const immediate = adapter.readText(composer);
 
       await new Promise((resolve) =>
