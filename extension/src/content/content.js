@@ -260,7 +260,7 @@
     // The modal previews a TRUNCATED redaction for readability; what
     // gets sent is the full string from the server. Sending the
     // preview would silently drop the tail of long messages.
-    if (redacting) sendRedacted(verdict.redacted_text);
+    if (redacting) await sendRedacted(verdict.redacted_text);
     else approve();
   }
 
@@ -353,31 +353,49 @@
    * @param {string} replacement the redacted text from the backend
    * @returns {boolean}
    */
-  function sendRedacted(replacement) {
+  async function sendRedacted(replacement) {
     if (!pending || !composer) {
       console.warn(`${TAG} nothing pending to redact.`);
       return false;
     }
 
-    if (!adapter.replaceText(composer, replacement)) {
-      // Refusing to fall through to a normal send is the important
-      // part. If the replacement did not take, the composer still
-      // holds the ORIGINAL text, and sending it would transmit the
-      // secret under an approval the user gave for the redacted
-      // version — the worst possible failure of this feature.
-      console.error(`${TAG} could not replace composer text — send abandoned.`);
-      pending = null;
-      return false;
-    }
+    const original = pending.text;
 
-    // Re-read rather than trust the write. ProseMirror and React both
-    // reserve the right to normalise, reject or reformat what was set,
-    // and "we asked for it" is not evidence that it happened.
+    adapter.replaceText(composer, replacement);
+
+    // ---- Verify on a LATER FRAME, not immediately ---------------
+    // The first version checked straight away and reported success on
+    // a message that went out with the card number still in it.
+    //
+    // Two things were wrong with it. It read `innerText` — the same
+    // layer it had just written to — which proves the DOM changed and
+    // says nothing about whether the editor's MODEL changed. And
+    // ProseMirror reconciles asynchronously: when it rejects a
+    // mutation it re-renders the DOM from its model a frame later. So
+    // an immediate read sees our own write; a read after a frame sees
+    // what the editor decided to keep.
+    //
+    // Two frames rather than one, because the observer callback and
+    // the re-render can land in different ticks.
+    await new Promise((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(resolve))
+    );
+
+    // ---- Check for the SECRET, not for the placeholder -----------
+    // "Does it contain [REDACTED:?" is the wrong question — a partial
+    // write can satisfy it while the original text is still present.
+    // The only question that matters is whether what we were trying to
+    // remove is gone.
     const actual = adapter.readText(composer);
-    if (!actual.includes("[REDACTED:")) {
+
+    if (actual === original || actual.trim() !== replacement.trim()) {
       console.error(
-        `${TAG} redaction did not survive the editor — send abandoned. ` +
-        `Composer holds ${actual.length} chars.`
+        `%c ${TAG} REDACTION FAILED — SEND ABANDONED `,
+        "background:#a11; color:#fff; padding:2px 6px; border-radius:3px;",
+        `\n  wanted : ${replacement}` +
+        `\n  found  : ${actual}` +
+        `\n  The editor did not accept the replacement. The original text is ` +
+        `still in the composer and has NOT been sent.`
       );
       pending = null;
       return false;
@@ -443,10 +461,44 @@
     sendRedacted,
 
     /**
-     * Try a composer rewrite without sending, to check the editor
-     * trap in isolation. Returns whether the write took.
+     * Diagnose the composer rewrite without sending anything.
+     *
+     * Reports the DOM twice: immediately after the write, and after
+     * two animation frames. The gap between those two readings is the
+     * whole diagnosis.
+     *
+     *   immediate ✓  settled ✓   the editor accepted it
+     *   immediate ✓  settled ✗   the editor REVERTED it — the model
+     *                            never changed, and the old version of
+     *                            this helper reported success here
+     *   immediate ✗              the write never landed at all
      */
-    tryReplace: (text = "[REDACTED: TEST]") => adapter.replaceText(composer, text),
+    async tryReplace(text = "[REDACTED: TEST]") {
+      const before = adapter.readText(composer);
+      adapter.replaceText(composer, text);
+      const immediate = adapter.readText(composer);
+
+      await new Promise((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(resolve))
+      );
+      const settled = adapter.readText(composer);
+
+      const result = {
+        before,
+        immediate,
+        settled,
+        wroteToDom: immediate.includes(text),
+        survived: settled.includes(text),
+      };
+
+      console.log(
+        `${TAG} replace diagnosis — DOM write ${result.wroteToDom ? "OK" : "FAILED"}, ` +
+        `survived reconciliation ${result.survived ? "OK" : "NO (editor reverted it)"}`,
+        result
+      );
+
+      return result;
+    },
 
     /** Where would send() route right now? Useful when replay misbehaves. */
     sendButton: () => adapter.findSendButton(),

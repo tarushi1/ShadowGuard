@@ -328,18 +328,46 @@
         selection.removeAllRanges();
         selection.addRange(range);
 
-        // insertText on a full selection replaces it. Deprecated, and
-        // still the only call ProseMirror reliably observes.
-        const inserted = document.execCommand("insertText", false, text);
+        // ATTEMPT 1 — a synthetic paste.
+        //
+        // Paste is a FIRST-CLASS input path for ProseMirror: it
+        // registers a handler and routes the content through its own
+        // transaction pipeline, which is the only way the model
+        // actually changes. Writing to the DOM and hoping the editor
+        // notices is the approach that failed.
+        //
+        // dispatchEvent returns false when a listener called
+        // preventDefault — so `handled === true` here means ProseMirror
+        // took the paste, which is precisely the signal we want.
+        const transfer = new DataTransfer();
+        transfer.setData("text/plain", text);
 
-        if (!inserted) {
-          // Last resort. Works on a plain contenteditable, and is
-          // expected to fail on ProseMirror — which is exactly why the
-          // caller re-reads afterwards instead of trusting this.
-          element.textContent = text;
-          element.dispatchEvent(new InputEvent("input", { bubbles: true }));
-        }
+        const handled = !element.dispatchEvent(
+          new ClipboardEvent("paste", {
+            clipboardData: transfer,
+            bubbles: true,
+            cancelable: true,
+          })
+        );
 
+        // ATTEMPT 2 — execCommand on the same selection.
+        //
+        // Deprecated, and still works on plain contenteditables and on
+        // some editor versions. Only tried when the paste was ignored.
+        if (!handled) document.execCommand("insertText", false, text);
+
+        // Deliberately NOT falling back to `element.textContent = text`.
+        //
+        // That writes to the DOM without going through any input path,
+        // so the editor's model is untouched — the box shows the
+        // redacted text and the app sends the original. A fallback that
+        // produces a convincing-looking failure is worse than no
+        // fallback, because the caller cannot tell it apart from
+        // success.
+        //
+        // The return value is DOM evidence only, which is all an
+        // isolated-world content script can observe. The caller must
+        // still re-check on a later frame — see sendRedacted().
         return this.readText(element).includes(text.slice(0, 24));
       } catch (error) {
         console.error("[ShadowGuard] replaceText failed:", error);
