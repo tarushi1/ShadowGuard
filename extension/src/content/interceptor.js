@@ -55,10 +55,29 @@ globalThis.SG.Interceptor = class Interceptor {
    * @param {function} getComposer  () => HTMLElement|null — the live handle
    * @param {function} onIntercept  (text, context) => void
    */
-  constructor(adapter, getComposer, onIntercept) {
+  constructor(adapter, getComposer, onIntercept, options = {}) {
     this.adapter = adapter;
     this.getComposer = getComposer;
     this.onIntercept = onIntercept;
+
+    /**
+     * How we decide an event came from a real keystroke.
+     *
+     * A TEST SEAM, and the only one in this file. `isTrusted` is set
+     * by the browser and cannot be forged — which is exactly why it is
+     * the right guard in production and an impossible one to exercise
+     * in a test. JSDOM defines it as a non-configurable own property,
+     * so every event a test can construct looks synthetic, and the
+     * most important behaviour in this class — "a real Enter IS
+     * intercepted" — could not be asserted at all.
+     *
+     * This does not weaken the guard. Production uses the default,
+     * which reads the native flag; the override exists only for a test
+     * that holds the instance. Page script cannot reach this object —
+     * it lives in the extension's isolated world — so there is nothing
+     * here for a hostile page to substitute.
+     */
+    this.isTrusted = options.isTrusted ?? ((event) => event.isTrusted === true);
 
     /**
      * Master switch, flipped from the console via __sg.disable().
@@ -136,7 +155,7 @@ globalThis.SG.Interceptor = class Interceptor {
     // straight through. No "am I currently replaying?" flag to set,
     // clear, and eventually leave stuck in the wrong state after an
     // exception.
-    if (!event.isTrusted) return pass("synthetic event (replay)");
+    if (!this.isTrusted(event)) return pass("synthetic event (replay)");
 
     const composer = this.getComposer();
     if (!composer) return pass("no composer handle");

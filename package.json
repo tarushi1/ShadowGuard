@@ -1,0 +1,13 @@
+{
+  "name": "shadowguard-extension-tests",
+  "version": "0.9.3",
+  "private": true,
+  "type": "commonjs",
+  "description": "Test harness for the ShadowGuard Chrome extension. The Python side is covered by pytest; this covers the half pytest cannot reach.",
+  "scripts": {
+    "test": "node --test 'extension/tests/**/*.test.js'"
+  },
+  "devDependencies": {
+    "jsdom": "^25.0.1"
+  }
+}
