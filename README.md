@@ -23,6 +23,7 @@ It computes a risk score and decides whether to **allow**, **warn**, **redact**,
 | [docs/security.md](docs/security.md) | Threat model, known bypasses, privacy, ethics, limitations |
 | [docs/testing.md](docs/testing.md) | How to verify every component and debug by symptom |
 | [evaluation/README.md](evaluation/README.md) | The corpus, its methodology, and the threats to validity — **report material** |
+| [extension/tests/README.md](extension/tests/README.md) | The JavaScript test harness — what it covers, and what it deliberately cannot |
 | [evaluation/corpus-spec-v2.md](evaluation/corpus-spec-v2.md) | The corpus extension, **pre-registered** with six predictions, then graded — three were wrong |
 
 ---
@@ -33,10 +34,10 @@ It computes a risk score and decides whether to **allow**, **warn**, **redact**,
 |---|---|
 | **Last updated** | 2026-08-03 |
 | **Project root** | `/Users/arushitiwari/Desktop/ShadowGuard` |
-| **Git branch** | `main` (52 commits, working tree clean) |
+| **Git branch** | `main` (53 commits, working tree clean) |
 | **Current stage** | Stages 0, 1, 2 and the risk engine running end to end. **Recall 98% at 0% FPR.** |
-| **Completed** | **Weeks 1–4 complete**; 5.1 risk engine, 5.2 redaction. 2.6 deferred to Week 6. |
-| **Next task** | **5.3 — SQLAlchemy models and the SQLite schema** |
+| **Completed** | **Weeks 1–4 complete**; 5.1 risk engine, 5.2 redaction, 5.3 extension tests. |
+| **Next task** | **5.4 — SQLAlchemy models and the SQLite schema** |
 | **Deadline** | ~2026-09-20 (8 weeks from 2026-07-26) |
 | **Weeks elapsed** | ~0.6 of 8 — **well ahead of plan** |
 
@@ -100,11 +101,21 @@ Measured at **~0.04 ms** per message.
 If the backend is unreachable, a **grey** "offline — not inspected" modal appears and sending is
 the focused default (fail open, visibly — see [D12](docs/decisions.md)).
 
-Try it: `how do I sort a list in python` sends straight through; `charge 4111 1111 1111 1111`
-offers **redaction** (Luhn-validated — change the last digit and it stops firing); `deploy key
-AKIAIOSFODNN7EXAMPLE` offers redaction, while the bare key `AKIAIOSFODNN7EXAMPLE` alone **blocks**,
-because there would be nothing left to send; `internal auth token Zq7Wm2Kp9Xr4Nv6Bt8Lc3Hd5Fj1Gy0Ae` warns on
-entropy alone, matching no pattern. Then stop the server and send anything to see the offline path.
+Try it, and note that the same secret produces different actions depending on how much of the
+message it occupies:
+
+| Send this | Verdict |
+|---|---|
+| `how do I sort a list in python` | **allow**, silently |
+| `charge 4532015112830366 for the invoice please` | **redact** — score 54, the sentence survives |
+| `charge 4111 1111 1111 1111` | **warn**, score 54 — the card is 73% of the message, so redacting leaves nothing to send |
+| `charge 4111 1111 1111 1112` | **allow** — one digit changed, fails the Luhn checksum, so it is not a card |
+| `AKIAIOSFODNN7EXAMPLE` | **block**, score 92 — the message *is* the secret |
+| `my deploy key is AKIAIOSFODNN7EXAMPLE, how do I rotate it` | **redact** — same key, but now there is a question left to ask |
+| `internal auth token Zq7Wm2Kp9Xr4Nv6Bt8Lc3Hd5Fj1Gy0Ae` | **warn**, score 43 — entropy alone, matching no pattern |
+| `our client Deborah Alvarez is threatening to sue` | **warn**, score 40 — no identifier at all, caught by context |
+
+Then stop the server and send anything to see the offline path.
 
 Each request carries a `request_id` that appears in **both** the browser console and the uvicorn
 terminal — that correlation is what makes an incident traceable across systems.
@@ -638,8 +649,9 @@ Every task is independently testable — you know it works before moving on.
 |---|---|---|
 | 5.1 Risk engine: weighted fusion, tunable policy file | Recall 89% → 98% at 0% FPR | ✅ |
 | 5.2 Redaction: `redact` action and `redacted_text` | Secret removed, rest of the message survives | ✅ |
-| 5.3 SQLAlchemy models + SQLite schema | Rows written, no prompt text stored | ⬜ **next** |
-| 5.4 Event logging and dashboard-ready queries | Decisions queryable by user and time | ⬜ |
+| 5.3 Extension test harness (JSDOM) | 39 tests; each regression verified by re-introducing its bug | ✅ |
+| 5.4 SQLAlchemy models + SQLite schema | Rows written, no prompt text stored | ⬜ **next** |
+| 5.5 Event logging and dashboard-ready queries | Decisions queryable by user and time | ⬜ |
 
 > **5.1 delivered the number Week 4 could not.** The Stage 1 → Stage 1+2 gap the original plan
 > called "the single most important number in the report" is **+9 recall points**, and it only
@@ -687,9 +699,22 @@ designed-but-unimplemented. Dropping the evaluation is not an option.
 **After editing extension code:** click the ↻ reload icon on the ShadowGuard card, *then* reload
 the ChatGPT tab. Editing the service worker requires the extension reload; editing the content
 script requires the page reload. Skipping either is the most common "my change did nothing"
-confusion.
+confusion — and the version line in the console (`[ShadowGuard] version : 0.9.3`) is how you tell
+whether the reload actually took.
 
-### Backend (not built yet — Week 3)
+### Extension tests
+
+```bash
+npm install     # once — pulls jsdom
+npm test        # 39 tests
+```
+
+Runs against JSDOM in about a second, and covers the composer rewrite, the interception guards, the
+modal's decision flow, and the Python ↔ JavaScript action vocabulary. It does **not** replace
+opening Chrome — see [extension/tests/README.md](extension/tests/README.md) for what it
+deliberately cannot reach.
+
+### Backend
 
 System Python is **3.9.6 (Apple's)** and must not be used: `pip install` into it can break OS
 tooling, and 3.9 sits at the bottom of the supported range for Presidio/spaCy, which causes

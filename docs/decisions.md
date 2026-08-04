@@ -834,6 +834,63 @@ convincingly is worse than no fallback**, because the caller cannot distinguish 
 
 ---
 
+## D40 — The extension gets its own test suite, and its limits are stated
+
+**Context.** Three defects in three days, all in JavaScript, all found by a human in a browser
+([D38](#d38--approve-and-discard-were-missing-from-main),
+[D39](#d39--writing-to-someone-elses-editor-and-four-wrong-fixes)). At the time, Python had **181
+tests and none of the bugs**; the extension had **zero tests and all three**.
+
+The roadmap said Week 5 continued into SQLite persistence. That was deferred, because the argument
+had stopped being theoretical.
+
+**Chosen:** Node's built-in runner (`node --test`) plus **jsdom**. No Jest, no Vitest, no build
+step. The content scripts are classic scripts that attach to `globalThis.SG` — a design chosen so
+they could avoid ES modules — which turns out to make them load in a test exactly as they load in
+Chrome.
+
+**Two things make the suite worth trusting.**
+
+**Every regression test was verified by re-introducing its bug.** Deleting `function approve` fails
+two tests; removing the `selectionchange` nudge fails two; making the block override reachable and
+showing the original text in the redact preview fails two more. *A regression test that has never
+failed is an assertion about code, not a test of it.*
+
+**The fake editor models what ProseMirror was measured doing, not what it documents.** It appends on
+a collapsed selection and reverts direct DOM writes, because that is what the real editor was
+observed to do. Modelling the documented behaviour would have reproduced the mistake that caused
+D39 — four fixes, each verified against an assumption, each wrong.
+
+**What the suite deliberately cannot reach**, stated in `extension/tests/README.md` rather than
+left for someone to discover:
+
+- **Top-layer rendering** — the entire reason `<dialog>` was chosen over a positioned div
+  ([D9](#d9--closed-shadow-dom--dialogshowmodal-for-the-modal)). JSDOM has no layout.
+- **Real editor behaviour** — a model that agrees with our assumptions passes even when they are
+  wrong.
+- **Chrome's extension APIs** — `chrome.runtime` is a stand-in.
+- **ChatGPT's actual DOM** — when they ship a redesign these tests keep passing and the extension
+  stops working.
+
+Browser verification stays a required manual step. *A test suite that overstates its reach is worse
+than a small honest one*, because it converts "we did not check" into "we checked and it was fine".
+
+**One test seam was added to production code.** `Interceptor` accepts an `isTrusted` override.
+The browser sets that flag and nothing in JavaScript can forge it — which is why it is the correct
+guard in production and an impossible one to exercise in a test. JSDOM defines it as a
+non-configurable own property, so every event a test can construct looks synthetic, and *"a real
+Enter is intercepted"* — the single most important behaviour in the class — could not be asserted
+at all. Production uses the default; the override is reachable only from the isolated world, where
+no page script can reach it.
+
+**A side effect worth noting.** Writing `contract.test.js` — which parses the `Action` enum out of
+the Python source and asserts `SG.ACTION` matches — immediately found **three stale claims in the
+documentation**: the README said a bare `deploy key AKIA…` offers redaction (it blocks), and
+`docs/testing.md` carried scores from before the risk engine existed. Documentation drifts exactly
+like code, and only executable checks notice.
+
+---
+
 ## Still open
 
 | Question | Decide by |

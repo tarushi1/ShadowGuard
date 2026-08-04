@@ -16,8 +16,13 @@ uvicorn backend.app.main:app --reload
 **Terminal — tests:**
 ```bash
 cd ~/Desktop/ShadowGuard && source .venv/bin/activate
-pytest -q
+pytest -q        # 181 — backend: detectors, risk engine, redaction, API contract
+npm test         # 39  — extension: adapter, interceptor, modal, cross-language contracts
 ```
+
+Both, every time. They cover different halves and neither can see the other's failures — the two
+worst bugs in this project so far were in the half that had no tests at all
+([D38](decisions.md), [D39](decisions.md)).
 
 **Chrome — extension:**
 1. `chrome://extensions` → **Developer mode** ON
@@ -64,6 +69,11 @@ __sg.disable()       // stop intercepting, so the tab stays usable
 __sg.enable()        // resume
 __sg.stats()         // {seen, intercepted, passed} — proves guards fire
 __sg.modal           // the modal instance (its shadow root is closed; this is the only handle)
+
+await __sg.tryReplace()   // diagnose the composer rewrite: reports how many characters
+                          // the selection covered, and whether the edit survived
+await __sg.clear()        // empty the composer, e.g. after a failed rewrite
+__sg.sendRedacted(text)   // swap the composer's contents, then send
 ```
 
 **Remember `__sg.disable()` exists.** With every send path closed, that tab cannot send anything
@@ -78,9 +88,9 @@ Backend must be running for rows 1–5.
 | # | Do | Expect |
 |---|---|---|
 | 1 | Type `how do I reverse a string in python`, Enter | **Sends normally, no modal.** Server logs `action=allow`. |
-| 2 | Type `charge 4111 1111 1111 1111`, Enter | 🔴 modal, score 75, `credit card`. Cancel → nothing sends, text stays. |
+| 2 | Type `charge 4111 1111 1111 1111`, Enter | 🔴 modal, **warn** score 54, `credit card`. Cancel → nothing sends, text stays. |
 | 3 | Same, then **Send anyway** | Sends |
-| 4 | Type `deploy key AKIAIOSFODNN7EXAMPLE`, Enter | 🟣 critical, **no override button** |
+| 4 | Type `AKIAIOSFODNN7EXAMPLE` alone, Enter | 🟣 **block**, score 92, **no override button** |
 | 5 | Same via the **arrow button** | Same modal, `trigger: send-button` |
 | 6 | **Stop the server**, send anything | ⬜ **grey** "offline, not inspected" modal, sending focused |
 | 7 | Restart server, send again | Normal verdicts resume |
@@ -93,8 +103,14 @@ Backend must be running for rows 1–5.
 | 14 | Switch conversation in the sidebar | `composer RE-attached`. Interception still works. |
 | 15 | Esc on a warning modal | Treated as Cancel |
 | 16 | Type `charge 4111 1111 1111 1112` (last digit changed) | **No modal** — fails the Luhn checksum, so it is not a card |
-| 17 | Type `internal auth token Zq7Wm2Kp9Xr4Nv6Bt8Lc3Hd5Fj1Gy0Ae` | 🟠 modal, score 50, `high entropy string` — matches no regex rule at all |
+| 17 | Type `internal auth token Zq7Wm2Kp9Xr4Nv6Bt8Lc3Hd5Fj1Gy0Ae` | 🟠 modal, **warn** score 43, `high entropy string` — matches no regex rule at all |
 | 18 | Type `see commit e83c5163316f89bfbde7d9ab23ca2e25604af290` | **No modal** — git SHAs are excluded |
+| 19 | Type `charge 4532015112830366 for the invoice please` | 🟠 **redact** modal titled *"Sensitive content can be removed"*. Preview shows `[REDACTED: CREDIT_CARD]`, **not** the digits |
+| 20 | Row 19, then **Send redacted** | ChatGPT receives the placeholder version. Amber `SENDING REDACTED` in the console. **Read your own message bubble to confirm.** |
+| 21 | Type `my deploy key is AKIAIOSFODNN7EXAMPLE, how do I rotate it` | **redact**, not block — same key as row 4, but a question survives its removal |
+| 22 | Type `our client Deborah Alvarez is threatening to sue` | 🟠 **warn** score 40 — no identifier at all; caught because the name is a *data subject*, not a topic |
+| 23 | Type `explain how Satya Nadella restructured Microsoft` | **No modal** — same entity types as row 22, decided by context |
+| 24 | `await __sg.tryReplace()` with text in the box | `selection covered N chars … REPLACED correctly`, where N is the length of what was there |
 
 ### The rows that matter most
 
@@ -108,6 +124,12 @@ Backend must be running for rows 1–5.
 - **13** — ChatGPT swaps send for a **stop** button while streaming. A replay that clicks it
   aborts the assistant's reply instead of sending. The failure that embarrasses you live.
 - **14** — proves the `MutationObserver` earns its keep. A one-shot `querySelector` fails here.
+- **20** — the ONLY way to verify redaction. Every layer inside the browser can agree the
+  replacement worked while ChatGPT sends the original, because ProseMirror's model is invisible
+  from the content script's world. Reading the sent message is the only check that cannot lie
+  ([D39](decisions.md)).
+- **22 vs 23** — identical entity types, opposite verdicts. The clearest demonstration the project
+  has, and it takes ten seconds to show at a demo.
 
 ---
 
@@ -126,18 +148,18 @@ Request body → **Execute**.
 ```json
 {"text": "email arushi@example.com about it", "user_id": "test", "platform": "chatgpt"}
 ```
-→ `allow`, score 20, `EMAIL` (an address alone is not a secret)
+→ `allow`, score 8, `EMAIL` (an address alone is not a secret)
 
 ```json
 {"text": "charge 4111 1111 1111 1111 please", "user_id": "test", "platform": "chatgpt"}
 ```
-→ `warn`, score 75, `CREDIT_CARD` — Luhn-validated. Change one digit and it disappears.
+→ `warn`, score 54, `CREDIT_CARD` — Luhn-validated. Change one digit and it disappears.
 
 ```json
 {"text": "deploy key AKIAIOSFODNN7EXAMPLE", "user_id": "test", "platform": "chatgpt"}
 ```
-→ `block`, score 95, `AWS_ACCESS_KEY_ID`, and **`stages_run: ["regex"]`** — the short-circuit,
-visible. Every other input returns `["regex", "entropy"]`.
+→ `block`, score 92, `AWS_ACCESS_KEY_ID`, and **`stages_run: ["regex"]`** — the short-circuit,
+visible. Every other input returns `["regex", "entropy", "semantic"]`.
 
 ```json
 {"text": "internal auth Zq7Wm2Kp9Xr4Nv6Bt8Lc3Hd5Fj1Gy0Ae", "user_id": "test", "platform": "chatgpt"}
