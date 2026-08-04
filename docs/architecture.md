@@ -138,9 +138,18 @@ Every design decision in Stage 0 follows from that single fact.
 | `backend/app/pipeline/` | Stage sequencing, short-circuiting, result merging | Know about HTTP |
 | `backend/app/detectors/` | Pure detection functions | Perform I/O or know about HTTP |
 | `backend/app/core/` | Risk fusion, all tunable weights and thresholds | Be scattered across other modules |
+| `backend/app/models/` | The database schema | Contain a column that can hold prompt text |
+| `backend/app/db/` | The **only** module that writes to the database | Accept the user's text as an argument |
 
 The adapter layer is why adding Gemini in Week 6 is **one new file**, not a rewrite: it cannot
 break ChatGPT because it does not touch any ChatGPT code path.
 
 The detectors/routes split is why the evaluation harness can run hundreds of samples in
 milliseconds with no server process.
+
+The `db`/`models` split carries a privacy rule rather than a tidiness one. `record_decision()`
+takes the **response** — already stripped of user content by the API schema — and a `char_count`
+computed by its caller, so it never receives the text at all. Storing a prompt would require
+adding a column, changing that signature, and deleting a test that searches the database file for
+secrets. That is a deliberate act, which is the point: *"do not store prompt text"* is one
+convenient five-line change away from being false if it is only a rule people remember.

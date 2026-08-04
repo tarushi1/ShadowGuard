@@ -26,7 +26,7 @@ Tracked deliberately. Each is either fixed, scheduled, or accepted with reasonin
 
 | # | Bypass | Status |
 |---|---|---|
-| B1 | **Edit-after-analysis.** The composer stays editable while a decision is pending, so a user can trip the warning with benign text, paste a secret while the modal is open, then click Proceed — sending text that was never inspected. | Detected and warned in `approve()`; becomes re-analysis in **Week 5** |
+| B1 | **Edit-after-analysis.** The composer stays editable while a decision is pending, so a user can trip the warning with benign text, paste a secret while the modal is open, then click Proceed — sending text that was never inspected. | **Still open.** `approve()` detects the change and warns in the console, which the user never sees. Week 5 was supposed to turn this into re-analysis and did not — recorded here rather than left as an expired promise |
 | B2 | **Fail-open.** Killing the backend disables inspection. | **Accepted** with a visible notice — see [D12](decisions.md#d12--fail-open-but-visibly) |
 | B3 | **`__sg` console handle.** `__sg.disable()` is reachable from DevTools. | Dev-only; would not ship in a real build |
 | B4 | **Off-path usage.** The ChatGPT API, a different browser, a phone. | Inherent to the approach. State it plainly. |
@@ -70,7 +70,7 @@ checksum, which would supply the evidence the pattern lacks and make the gate un
 
 ## Privacy properties
 
-These are design commitments, not aspirations — two of them have tests that fail if broken.
+These are design commitments, not aspirations. Most have tests that fail if broken.
 
 **The response never echoes the user's text.** Entities carry offsets into text the client
 already holds. A DLP service that returns the secret it just found has doubled the number of
@@ -82,12 +82,37 @@ more casually than databases. Logging prompts would recreate, in a plaintext fil
 exposure this project exists to prevent. Length and entity types are enough to debug with.
 → [test](../backend/tests/test_analyze_endpoint.py)
 
+**The database has no column that can hold a prompt.** The decision store records entity *types*,
+offsets, scores, timings and the action taken — never a character anyone typed. `char_count`
+replaces the text: enough to notice someone pasting 8000-character documents, useless for
+reconstructing them.
+
+This is structural rather than a rule. `record_decision()` takes the response, which the API
+schema has already stripped, and a length computed by its caller, so it cannot store the text even
+if someone tried. **A DLP tool's own database is the most concentrated collection of sensitive
+prompts in an organisation if anyone lets it become one** — and "do not store prompt text" is one
+convenient five-line change away from being false if it is only remembered.
+
+Two tests, because each catches what the other misses: one writes a known secret through the real
+endpoint and searches the database **file** for it — including the write-ahead log, where a secret
+can sit while the main file looks clean — and one fails the moment a forbidden column *name*
+appears, since the first would still pass on a column that exists but is not yet populated.
+→ [test](../backend/tests/test_persistence.py)
+
+**Retention is expressible, and not yet automatic.** `purge_older_than(days)` exists and cascades
+correctly to entity rows. **Nothing calls it on a schedule.** Stated here rather than implied,
+because a tool that keeps every decision forever becomes a permanent record of what each employee
+was working on and when — built by the team that promised to reduce exposure. Scheduling it is
+outstanding work, not a solved problem.
+
 **The backend makes no external calls.** Everything runs on `127.0.0.1`. A DLP tool that ships
 your secrets to a third-party API is self-defeating.
 
-**`.gitignore` covers the sensitive artefacts.** The SQLite database will contain real logged
-prompts; screenshots captured during OCR testing may contain real secrets. Both are ignored.
-A leaked `.env` in a DLP project is an embarrassing story.
+**`.gitignore` covers the sensitive artefacts.** The decision store holds no prompt text, but it
+*is* a record of when each user was warned or blocked, which is local user data — the whole
+`data/` directory is ignored, along with `-wal` and `-shm`, since SQLite buffers recent writes in
+the write-ahead log. Screenshots captured during OCR testing may contain real secrets. A leaked
+`.env` in a DLP project is an embarrassing story.
 
 **Least privilege.** The extension started with **zero** permissions; `storage` and two localhost
 hosts were added in the first task that needed them. Every permission carries a visible

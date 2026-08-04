@@ -778,9 +778,13 @@ a different occurrence, which is exactly how a real bug hides behind a known one
 
 **Restored in 5.2**, found while wiring the redaction path through the same functions.
 
-**The lesson for the report:** the Python side has 181 tests and the extension has none, and this is
-the first defect that gap has actually cost. Test coverage that stops at a language boundary leaves
-the other side of the boundary unprotected, no matter how good the numbers look on the tested half.
+**The lesson for the report:** at the time, the Python side had 181 tests and the extension had
+none, and this was the first defect that gap actually cost. Test coverage that stops at a language
+boundary leaves the other side unprotected, no matter how good the numbers look on the tested half.
+
+**Resolved by [D40](#d40--the-extension-gets-its-own-test-suite-and-its-limits-are-stated).** Two
+of the tests written there fail if this defect is reintroduced — verified by deleting the function
+and watching them go red.
 
 ---
 

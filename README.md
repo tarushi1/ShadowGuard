@@ -32,12 +32,12 @@ It computes a risk score and decides whether to **allow**, **warn**, **redact**,
 
 | | |
 |---|---|
-| **Last updated** | 2026-08-03 |
+| **Last updated** | 2026-08-04 |
 | **Project root** | `/Users/arushitiwari/Desktop/ShadowGuard` |
-| **Git branch** | `main` (53 commits, working tree clean) |
-| **Current stage** | Stages 0, 1, 2 and the risk engine running end to end. **Recall 98% at 0% FPR.** |
-| **Completed** | **Weeks 1–4 complete**; 5.1 risk engine, 5.2 redaction, 5.3 extension tests. |
-| **Next task** | **5.4 — SQLAlchemy models and the SQLite schema** |
+| **Git branch** | `main` (56 commits, working tree clean) |
+| **Current stage** | Stages 0, 1, 2, risk engine, redaction and persistence all live. **Recall 98% at 0% FPR.** |
+| **Completed** | **Weeks 1–5 complete.** 2.6 deferred to Week 6. |
+| **Next task** | **Week 6 — Tesseract OCR, then the Gemini adapter** |
 | **Deadline** | ~2026-09-20 (8 weeks from 2026-07-26) |
 | **Weeks elapsed** | ~0.6 of 8 — **well ahead of plan** |
 
@@ -443,36 +443,51 @@ ShadowGuard/
 │   │   ├── adapters/           one file per platform. Each knows only "where is the
 │   │   │                       composer / send button / how do I read and send". This is
 │   │   │                       why adding Gemini in Week 6 is one new file, not a rewrite.
-│   │   ├── ui/                 the warning modal, in a Shadow DOM so ChatGPT's CSS cannot
-│   │   │                       break our styling and vice versa.  [empty]
+│   │   ├── ui/                 the warning modal, in a CLOSED Shadow DOM so ChatGPT's CSS
+│   │   │                       cannot break our styling, or the page reach our buttons.
 │   │   └── shared/             message-type constants used by both worlds — prevents
 │   │                           typo'd message names failing silently.
+│   ├── tests/                  39 JSDOM tests. Every regression verified by re-introducing
+│   │                           its bug — see extension/tests/README.md.
 │   └── assets/icons/           toolbar icons (16/48/128px).  [empty — Week 8 polish]
 │
-├── backend/                    ← Stages 1-5. All the intelligence.  [empty]
+├── backend/                    ← Stages 1-5. All the intelligence.
 │   ├── app/
-│   │   ├── main.py             FastAPI app creation, CORS, router mounting. Entry point.
-│   │   ├── api/routes/         HTTP endpoints ONLY — parse request, call pipeline, return.
-│   │   │                       No detection logic here.
-│   │   ├── schemas/            Pydantic models = the typed contract between extension and
-│   │   │                       backend. Free validation + interactive API docs.
-│   │   ├── detectors/          one module per technique: regex.py, entropy.py, presidio.py,
-│   │   │                       ocr.py, behavioral.py. Each pure and independently testable.
-│   │   ├── pipeline/           the orchestrator: runs stages, short-circuits on critical
-│   │   │                       findings, merges results.
-│   │   ├── core/               risk_engine.py (weighted fusion), config.py (ALL tunable
-│   │   │                       weights and thresholds in one place).
-│   │   ├── models/             SQLAlchemy tables (Event, UserProfile).
-│   │   └── db/                 session management and initialisation.
-│   └── tests/                  pytest suite, written alongside each detector.
+│   │   ├── main.py             FastAPI app, CORS, lifespan (warms spaCy, opens the store).
+│   │   ├── api/routes/
+│   │   │   └── analyze.py      HTTP only — parse, call pipeline, log, persist, respond.
+│   │   ├── schemas/
+│   │   │   └── analyze.py      Pydantic models = the typed contract. THIS is the API spec.
+│   │   ├── detectors/          Pure functions. No I/O, no HTTP — which is what lets the
+│   │   │   │                   evaluation harness call them hundreds of times per second.
+│   │   │   ├── base.py         Finding, overlap resolution, severity ordering.
+│   │   │   ├── regex_detector.py     Stage 1a — 16 rules, Luhn, context gates (D29).
+│   │   │   ├── entropy_detector.py   Stage 1b — Shannon entropy for unknown formats.
+│   │   │   ├── semantic_detector.py  Stage 2 — Presidio + spaCy, entity allowlist (D28).
+│   │   │   └── catalog.py      entity type → severity, assembled FROM the detectors.
+│   │   ├── pipeline/
+│   │   │   └── orchestrator.py Stage sequencing, short-circuiting, Stage-2 merge (D26).
+│   │   ├── core/
+│   │   │   ├── policy.py       EVERY tunable weight and threshold. Data, not code.
+│   │   │   ├── risk.py         Weighted fusion (D33). The arithmetic only.
+│   │   │   └── redactor.py     Typed placeholders + coverage (D36, D37).
+│   │   ├── models/
+│   │   │   └── event.py        SQLAlchemy tables. No column can hold a prompt.
+│   │   └── db/
+│   │       ├── session.py      Lazy engine, SQLite pragmas, transactional scope.
+│   │       └── events.py       The ONLY module that writes. Dashboard queries live here.
+│   └── tests/                  197 tests, incl. conftest.py isolating the database.
 │
-├── evaluation/                 ← your grade depends on this folder  [empty]
-│   ├── data/                   labelled corpus: text samples + ground-truth labels.
-│   ├── results/                generated metrics (gitignored — regenerable).
-│   └── run_eval.py             loads corpus, runs pipeline, prints precision/recall/FPR.
+├── evaluation/                 ← your grade depends on this folder
+│   ├── data/corpus.jsonl       200 labelled samples, 100 sensitive / 100 benign.
+│   ├── corpus.py               loader + the honesty rules that keep labels consistent.
+│   ├── metrics.py              Wilson intervals, base-rate correction, entity-level counts.
+│   ├── run_eval.py             action-level AND entity-level metrics, three configurations.
+│   └── corpus-spec-v2.md       the PRE-REGISTERED extension spec, then graded (D32).
 │
-├── dashboard/                  ← admin UI  [empty — tech choice open]
-├── docs/diagrams/              ← architecture diagrams, report material, demo script  [empty]
+├── dashboard/                  ← admin UI  [empty — Week 7, tech choice open]
+├── docs/                       ← the knowledge base. Read docs/README.md first.
+├── data/                       ← the SQLite decision store  [gitignored — local user data]
 └── scripts/                    ← setup helpers  [empty]
 ```
 
@@ -650,8 +665,8 @@ Every task is independently testable — you know it works before moving on.
 | 5.1 Risk engine: weighted fusion, tunable policy file | Recall 89% → 98% at 0% FPR | ✅ |
 | 5.2 Redaction: `redact` action and `redacted_text` | Secret removed, rest of the message survives | ✅ |
 | 5.3 Extension test harness (JSDOM) | 39 tests; each regression verified by re-introducing its bug | ✅ |
-| 5.4 SQLAlchemy models + SQLite schema | Rows written, no prompt text stored | ⬜ **next** |
-| 5.5 Event logging and dashboard-ready queries | Decisions queryable by user and time | ⬜ |
+| 5.4 SQLAlchemy models + SQLite schema | Rows written; the database file itself is searched for secrets | ✅ |
+| 5.5 Event logging and dashboard-ready queries | Decisions queryable by user, action and entity type | ✅ |
 
 > **5.1 delivered the number Week 4 could not.** The Stage 1 → Stage 1+2 gap the original plan
 > called "the single most important number in the report" is **+9 recall points**, and it only

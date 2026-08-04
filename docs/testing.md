@@ -164,7 +164,7 @@ visible. Every other input returns `["regex", "entropy", "semantic"]`.
 ```json
 {"text": "internal auth Zq7Wm2Kp9Xr4Nv6Bt8Lc3Hd5Fj1Gy0Ae", "user_id": "test", "platform": "chatgpt"}
 ```
-→ `warn`, score 50, `HIGH_ENTROPY_STRING` — no regex rule matches this; only entropy finds it.
+→ `warn`, score 36, `HIGH_ENTROPY_STRING` — no regex rule matches this; only entropy finds it.
 
 ```json
 {"text": "hello", "platform": "chatgpt"}

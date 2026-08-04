@@ -60,9 +60,17 @@ that has not responded.
 | `score` | int | 0–100, fused risk |
 | `entities` | array | See below |
 | `message` | string | Human-readable text shown in the modal |
-| `redacted_text` | string? | Only for `action=redact` (Week 5) |
+| `redacted_text` | string? | **Only** for `action=redact`. The one field through which the server returns text — safe because what comes back is strictly *safer* than what the client already holds, never a copy of it |
+| `reasons` | string[] | Why the risk engine reached this score, in plain language. Names entity **types** and never matched values |
 | `latency_ms` | float | Server-side processing time |
 | `stages_run` | string[] | Which stages actually executed |
+
+**On `reasons`.** A score nobody can explain is a score nobody will trust: when a user asks why
+their message was stopped, `score 61` is not an answer and *"a name together with a way to contact
+them"* is. It is also what lets the dashboard show **why** rather than only **what**.
+
+It is new text on the response, so it is a new way for a secret to escape — a test asserts it never
+contains a matched value, at both the API and database boundaries.
 
 Each entity:
 
@@ -75,12 +83,13 @@ Each entity:
   "request_id": "1ebfbf73d282",
   "action": "block",
   "level": "critical",
-  "score": 95,
+  "score": 92,
   "entities": [
     { "type": "OPENAI_API_KEY", "start": 10, "end": 40, "score": 0.98, "detector": "regex" }
   ],
   "message": "This message contains openai api key. Sending has been blocked — remove it before trying again.",
   "redacted_text": null,
+  "reasons": ["openai api key"],
   "latency_ms": 0.034,
   "stages_run": ["regex"]
 }
