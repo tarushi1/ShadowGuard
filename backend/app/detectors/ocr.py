@@ -83,7 +83,18 @@ class OcrResult:
     """What an image turned out to say."""
 
     text: str
-    """Extracted text. Passed straight to Stages 1 and 2, never stored."""
+    """Extracted text, with recoverable OCR damage repaired.
+
+    Passed straight to Stages 1 and 2, never stored.
+    """
+
+    raw_text: str
+    """What Tesseract actually returned, before `repair()`.
+
+    Kept so the evaluation can measure what the repair is worth. If the
+    two are always identical, the repair is dead code dressed as a
+    feature.
+    """
 
     confidence: float
     """Mean per-word confidence, 0-1, or 0.0 when nothing was found.
@@ -105,6 +116,138 @@ class OcrResult:
     @property
     def is_empty(self) -> bool:
         return not self.text.strip()
+
+
+# ---------------------------------------------------------------
+# Repairing OCR damage
+# ---------------------------------------------------------------
+# Measured on the rendered corpus, every long vendor key was lost —
+# 30 findings, none surviving. Reading the actual output shows three
+# distinct kinds of damage, and only two of them can be undone:
+#
+#   sk-proj-Bq7...   ->  sk-proj—Bq7...      a Unicode dash
+#   ...Qr2St6Uv1Wx   ->  ...Qr2S t6Uv 1Wx    spurious spaces
+#   ...Gh0bIJ        ->  ...Gh@DHIJ          substituted characters
+#
+# The first two are repairable and are handled below. The third is not:
+# a substitution that changes the token's LENGTH defeats a rule written
+# as `{36}` no matter how the text is cleaned, and guessing which
+# characters were altered would invent content.
+#
+# WHY THIS IS SAFE TO DO AT ALL
+# -----------------------------
+# Repair runs ONLY on text that came from an image. Typed text never
+# passes through here, so the 98% recall and 0% false-positive rate
+# measured on the text corpus cannot be affected by anything in this
+# section. That containment is what makes an aggressive transformation
+# defensible: its blast radius is exactly the input that is already
+# known to be lossy.
+
+# Every Unicode dash Tesseract substitutes for a plain hyphen.
+# `sk-proj-` becoming `sk-proj—` is enough on its own to defeat the
+# OpenAI rule, and the mapping is unambiguous in both directions.
+_DASHES = str.maketrans({
+    "‐": "-", "‑": "-", "‒": "-", "–": "-",
+    "—": "-", "―": "-", "−": "-", "­": "-",
+})
+
+# Prefixes whose format we know, with the maximum number of characters
+# that can legitimately follow. Space removal is anchored to these
+# rather than applied to the whole text: joining every short token
+# would fuse ordinary prose into nonsense and hand the entropy stage a
+# stream of invented secrets.
+_PREFIX_LIMITS: tuple[tuple[str, int], ...] = (
+    ("github_pat_", 90),
+    ("sk-ant-", 120),
+    ("sk-proj-", 120),
+    ("sk-svcacct-", 120),
+    ("sk_live_", 60),
+    ("ghp_", 40), ("gho_", 40), ("ghu_", 40), ("ghs_", 40), ("ghr_", 40),
+    ("xoxb-", 60), ("xoxp-", 60), ("xoxa-", 60), ("xoxr-", 60), ("xoxs-", 60),
+    ("AIza", 40),
+    ("AKIA", 20), ("ASIA", 20), ("ABIA", 20), ("ACCA", 20),
+    ("sk-", 120),
+    ("eyJ", 400),
+)
+
+
+def _looks_like_token_debris(chunk: str) -> bool:
+    """Is this fragment part of a split secret, or a real word?
+
+    The guard that stops repair from eating the sentence after a key.
+    `sk-proj-Bq7 is not working` must not become `sk-proj-Bq7isnotworking`.
+
+    A fragment counts as debris only if it looks random: it contains a
+    digit, or it mixes cases. Ordinary English words in this position —
+    `is`, `not`, `working`, `please` — are lowercase and digit-free, so
+    they are left alone and the repair stops there.
+    """
+    if not chunk or not chunk.isalnum():
+        return False
+
+    return any(c.isdigit() for c in chunk) or (
+        any(c.isupper() for c in chunk) and any(c.islower() for c in chunk)
+    )
+
+
+def repair(text: str) -> str:
+    """Undo the OCR damage that can be undone without inventing content.
+
+    Two transformations, both anchored to evidence rather than applied
+    blindly:
+
+      1. Unicode dashes become ASCII hyphens, everywhere. Unambiguous.
+      2. Spaces are removed inside a run that FOLLOWS A KNOWN VENDOR
+         PREFIX, and only while the following fragment looks like
+         debris rather than a word.
+
+    Not attempted: reversing character substitutions. `0` read as `@`
+    could be repaired by mapping `@` back, but `@` also appears in
+    every email address, and a transformation that corrupts real
+    content to rescue a guess is worse than the miss it fixes.
+
+    :param text: raw OCR output
+    :returns: text with recoverable damage undone
+    """
+    repaired = text.translate(_DASHES)
+
+    for prefix, limit in _PREFIX_LIMITS:
+        repaired = _rejoin_after(repaired, prefix, limit)
+
+    return repaired
+
+
+def _rejoin_after(text: str, prefix: str, limit: int) -> str:
+    """Remove spaces in the token run following each `prefix`."""
+    result = text
+    search_from = 0
+
+    while (index := result.find(prefix, search_from)) != -1:
+        cursor = index + len(prefix)
+        consumed = 0
+
+        while cursor < len(result) and consumed < limit:
+            char = result[cursor]
+
+            if char.isalnum() or char in "-_":
+                cursor += 1
+                consumed += 1
+                continue
+
+            if char == " ":
+                # Look at the next fragment before deciding to join.
+                rest = result[cursor + 1 :]
+                chunk = rest.split(" ", 1)[0].rstrip(".,;:!?)")
+
+                if _looks_like_token_debris(chunk) and consumed + len(chunk) <= limit:
+                    result = result[:cursor] + result[cursor + 1 :]
+                    continue
+
+            break
+
+        search_from = index + len(prefix)
+
+    return result
 
 
 def available() -> bool:
@@ -209,13 +352,15 @@ def extract_text(image_bytes: bytes) -> OcrResult:
         if value >= 0:
             confidences.append(value / 100.0)
 
+    # Space-joined rather than newline-joined. Line structure is lost
+    # either way at this level, and a space is the safer separator:
+    # joining without one would fuse adjacent words into a single token
+    # that could look like a secret to the entropy stage.
+    raw = " ".join(words)
+
     return OcrResult(
-        # Space-joined rather than newline-joined. Line structure is
-        # lost either way at this level, and a space is the safer
-        # separator: joining without one would fuse adjacent words into
-        # a single token that could look like a secret to the entropy
-        # stage.
-        text=" ".join(words),
+        text=repair(raw),
+        raw_text=raw,
         confidence=sum(confidences) / len(confidences) if confidences else 0.0,
         width=image.width,
         height=image.height,

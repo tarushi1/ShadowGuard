@@ -32,12 +32,12 @@ It computes a risk score and decides whether to **allow**, **warn**, **redact**,
 
 | | |
 |---|---|
-| **Last updated** | 2026-08-04 |
+| **Last updated** | 2026-08-05 |
 | **Project root** | `/Users/arushitiwari/Desktop/ShadowGuard` |
 | **Git branch** | `main` (56 commits, working tree clean) |
 | **Current stage** | Stages 0, 1, 2, risk engine, redaction and persistence all live. **Recall 98% at 0% FPR.** |
-| **Completed** | **Weeks 1–5 complete.** 2.6 deferred to Week 6. |
-| **Next task** | **Week 6 — Tesseract OCR, then the Gemini adapter** |
+| **Completed** | **Weeks 1–5 complete**; 6.1 OCR done and measured. |
+| **Next task** | **6.2 — extension-side image capture (the deferred task 2.6)** |
 | **Deadline** | ~2026-09-20 (8 weeks from 2026-07-26) |
 | **Weeks elapsed** | ~0.6 of 8 — **well ahead of plan** |
 

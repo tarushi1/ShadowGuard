@@ -895,6 +895,122 @@ like code, and only executable checks notice.
 
 ---
 
+## D41 — Stage 3 is a text source, and stores nothing
+
+**Context.** OCR could have been built as another detector, with its own rules for what is
+sensitive in an image.
+
+**Chosen:** it produces **text**, and that text goes through Stages 1 and 2 completely unchanged —
+same regex rules, same entropy thresholds, same Presidio engine, same risk policy.
+
+*A screenshot of an API key is not a new detection problem; it is the old one behind a new door.*
+`detectors/ocr.py` therefore contains no rules and no scoring, and every improvement to Stage 1
+automatically improves image handling.
+
+**Storage: metadata only.** Neither the image nor the extracted text is kept. The image is decoded
+in memory and discarded when the call returns; only entity *types*, counts and the verdict reach
+the decision store.
+
+Rejected alternatives and why:
+
+| Option | Why not |
+|---|---|
+| Store the extracted OCR text | It *is* the secret the tool just found — it would contradict the entire premise of the decision store |
+| Store the image | **A screenshot is more sensitive than the text inside it.** It also carries hostnames, usernames, window titles, adjacent tabs and whatever else was on screen. It would also need encryption at rest, access control, and a very good answer to *"why does the security tool have a folder of my screenshots?"* |
+
+**Ground truth for evaluation comes from rendering the corpus into images**
+(`evaluation/render.py`), so image contents are known by construction — no hand-transcription, no
+second OCR engine grading the first, and fully reproducible.
+
+**The caveat that governs how these numbers may be quoted:** rendered text is *cleaner* than a real
+screenshot — no compression artefacts, no window chrome, no cursor sitting on a character. Every
+OCR figure in this project is an **upper bound**.
+
+---
+
+## D42 — Repairing OCR damage, and the two things it cannot fix
+
+**Context.** The first measurement was worse than expected in a specific way. Overall retention was
+86.7%, but the aggregate hid the result:
+
+```
+PERSON, LOCATION, AWS_ACCESS_KEY_ID, INDIA_PAN, AADHAAR      100%
+CREDIT_CARD 93% · HIGH_ENTROPY_STRING 92% · ORGANIZATION 88%
+OPENAI · ANTHROPIC · GITHUB · GOOGLE · SLACK · STRIPE
+  · JWT · PRIVATE_KEY                                          0%
+```
+
+**Every long mixed-case vendor key was lost — 30 findings, no survivors.** Tesseract's model is
+trained on natural language and has no prior for random mixed-case strings.
+
+Reading the actual output showed three distinct kinds of damage:
+
+```
+sk-proj-Bq7...  ->  sk-proj—Bq7...       a Unicode dash
+...Qr2St6Uv...  ->  ...Qr2S t6Uv ...     spurious spaces
+...Gh0bIJ       ->  ...Gh@DHIJ           substituted characters
+```
+
+The inserted spaces were the compounding failure: they split a token into fragments shorter than
+the entropy stage's 20-character minimum, so **the one detector that does not need an exact match
+could not rescue the ones that do.**
+
+**Chosen:** repair the first two, refuse to guess at the third.
+
+- **Unicode dashes → ASCII hyphen.** Unambiguous in both directions.
+- **Space removal anchored to KNOWN VENDOR PREFIXES**, never applied globally. Joining every short
+  token would fuse ordinary prose into invented secrets. A guard stops the repair eating the rest
+  of the sentence: a fragment is only joined if it *looks random* — contains a digit, or mixes case
+  — so `sk-proj-Bq7 is not working` does not become one token.
+- **Character substitutions are NOT reversed.** `@` could be mapped back to `0`, but `@` appears in
+  every email address, and *a transformation that corrupts real content to rescue a guess is worse
+  than the miss it fixes.*
+
+**Why an aggressive transformation is defensible here:** repair runs **only** on text that came from
+an image. Typed text never passes through it, so the 98% recall and 0% false-positive rate measured
+on the text corpus cannot be affected. Its blast radius is exactly the input already known to be
+lossy.
+
+**Measured, both directions** — because retention alone is a half-measurement. *Any* transformation
+that makes text "more detectable" improves retention; the only thing that stops it being free is
+the false positives it creates.
+
+| | before repair | after |
+|---|---|---|
+| detection retention | 86.7% | **93.9%** |
+| OCR-induced false positives | — | **2.0%** |
+
+**The remaining 2% is the mirror image of the original problem, and worth stating that way.**
+Both false positives are benign hex strings — a git SHA and a `sha256:` digest — that OCR split and
+corrupted:
+
+```
+7f3d9a2b8c4e6015d3f7a9b2c8e4061d5a3f7b9c
+7f3d9a2b8c4e6015d3f 7a9b2c8e4061d5a3Ff7b9c
+```
+
+The entropy stage recognises a git SHA as benign because it is pure hex with a known shape. Break
+it and corrupt one character and it stops looking like a SHA and starts looking like a secret.
+**OCR damage defeats exact-match suppression exactly as it defeats exact-match detection**, and any
+tool that adds an image path inherits both.
+
+Accepted rather than fixed: the obvious remedy — widening the digest-marker lookback so a `sha256:`
+earlier in the line suppresses later fragments — is speculative tuning on two samples, which is the
+line D25 draws.
+
+**Predictions, graded.** Five were registered before the first run and a sixth before the repair
+was measured. **Four of six correct.**
+
+- **P2 was wrong and backwards.** `CREDIT_CARD` was predicted to degrade *most*, since Luhn gives
+  no partial credit for a single wrong digit. It retained **93%** — spaced digit groups are close
+  to ideal OCR input, and the checksum never got the chance to be the weak link. The reasoning was
+  sound; the premise was false.
+- **P3 was only half right.** `PERSON` did survive at 100%, but so did four structured types, so
+  "semantic degrades least" was not the distinction. The real predictor is **token shape**: short,
+  single-case or digit-only tokens survive; long mixed-case ones do not.
+
+---
+
 ## Still open
 
 | Question | Decide by |

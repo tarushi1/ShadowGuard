@@ -44,6 +44,10 @@ Written before the first run, in the spirit of D32:
   P5  HIGH_ENTROPY_STRING is resilient: character substitution
       preserves randomness, so the entropy stage should still fire
       even where the exact-match rules do not.
+
+  P6  (added before the repair step was measured) Repairing OCR damage
+      raises retention by at least 5 points and costs at most 2 points
+      of false-positive rate on rendered benign text.
 """
 
 import argparse
@@ -116,10 +120,19 @@ def _rule(char: str = "-", width: int = 74) -> str:
 
 
 def _report(style: RenderStyle, trips: list[RoundTrip]) -> str:
-    caught_typed = [t for t in trips if t.caught_when_typed]
+    sensitive = [t for t in trips if t.sample.is_sensitive]
+    benign = [t for t in trips if not t.sample.is_sensitive]
+
+    caught_typed = [t for t in sensitive if t.caught_when_typed]
     caught_ocr = [t for t in caught_typed if t.caught_via_ocr]
 
+    # A benign sample that was correctly allowed as text and is stopped
+    # as an image. Caused by OCR inventing content, or by the repair
+    # step joining fragments into something that looks like a secret.
+    invented = [t for t in benign if not t.caught_when_typed and t.caught_via_ocr]
+
     retention = len(caught_ocr) / len(caught_typed) if caught_typed else 0.0
+    fpr = len(invented) / len(benign) if benign else 0.0
     exact = sum(1 for t in trips if t.text_exact) / len(trips)
     confidence = sum(t.confidence for t in trips) / len(trips)
 
@@ -127,13 +140,16 @@ def _report(style: RenderStyle, trips: list[RoundTrip]) -> str:
         [
             f"{style.name}",
             _rule(),
-            f"  samples                {len(trips)}",
+            f"  samples                {len(trips)}   ({len(sensitive)} sensitive / {len(benign)} benign)",
             f"  mean OCR confidence    {confidence:6.1%}",
             f"  text reproduced exactly{exact:6.1%}   <- character-level fidelity",
             "",
             f"  detected as text       {len(caught_typed)}",
             f"  still detected as image{len(caught_ocr):6d}",
-            f"  DETECTION RETENTION    {retention:6.1%}   <- the number that matters",
+            f"  DETECTION RETENTION    {retention:6.1%}   <- what OCR loses",
+            "",
+            f"  benign, stopped anyway {len(invented):6d}",
+            f"  OCR-INDUCED FPR        {fpr:6.1%}   <- what OCR invents",
         ]
     )
 
@@ -150,6 +166,8 @@ def _by_entity_type(trips: list[RoundTrip]) -> str:
     expected: dict[str, int] = defaultdict(int)
 
     for trip in trips:
+        if not trip.sample.is_sensitive:
+            continue
         for entity_type in trip.typed_types:
             expected[entity_type] += 1
             if entity_type in trip.ocr_types:
@@ -201,13 +219,19 @@ def main() -> None:
 
     semantic_detector.warm_up()
 
-    # Sensitive samples only. Benign ones cannot lose a detection they
-    # never had, so they would dilute the retention figure without
-    # informing it — the false-positive question for OCR is a separate
-    # experiment on rendered benign text.
-    samples = [s for s in load() if s.is_sensitive]
+    # BOTH halves. Sensitive samples measure what OCR loses; benign
+    # ones measure what it invents.
+    #
+    # Reporting retention alone would be the classic half-measurement:
+    # any transformation that makes text "more detectable" improves
+    # retention, and the only thing that stops it being free is the
+    # false positives it creates. The repair step in ocr.py is exactly
+    # such a transformation, so it must be priced on both sides.
+    samples = load()
     if args.limit:
-        samples = samples[: args.limit]
+        sensitive = [s for s in samples if s.is_sensitive][: args.limit]
+        benign = [s for s in samples if not s.is_sensitive][: args.limit]
+        samples = sensitive + benign
 
     styles = STYLES if args.all_styles else (DEFAULT_STYLE,)
 

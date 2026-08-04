@@ -27,6 +27,19 @@ pydantic==2.13.4
 presidio-analyzer==2.2.364
 spacy==3.8.14
 
+# ---- OCR (Stage 3) ----
+# pytesseract is only a WRAPPER. The engine is a system package and
+# must be installed separately:
+#
+#   macOS   brew install tesseract
+#   Debian  apt install tesseract-ocr
+#
+# Without it the app still starts and Stage 3 reports itself
+# unavailable, which is the same degrade-don't-die rule the spaCy model
+# follows.
+pytesseract==0.3.13
+Pillow==12.3.0
+
 # ---- Persistence ----
 # 2.x for the typed declarative API (Mapped / mapped_column). The 1.x
 # style still works in 2.0, which makes it easy to copy an old snippet
