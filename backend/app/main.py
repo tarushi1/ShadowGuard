@@ -41,6 +41,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .api.routes import analyze as analyze_routes
+from .db import session
 from .detectors import semantic_detector
 
 # One log line per request, with the decision but never the content.
@@ -78,12 +79,27 @@ async def lifespan(_: FastAPI):
     refuses to start because one detector is unavailable protects
     nothing at all.
     """
+    log = logging.getLogger(__name__)
+
     try:
         semantic_detector.warm_up()
     except Exception:  # noqa: BLE001 - startup must never be fatal
-        logging.getLogger(__name__).exception(
-            "Stage 2 model failed to load; semantic detection will be unavailable"
-        )
+        log.exception("Stage 2 model failed to load; semantic detection will be unavailable")
+
+    # Creating the schema here rather than at import keeps `import
+    # backend.app` free of filesystem side effects — the evaluation
+    # harness imports the pipeline hundreds of times and must never
+    # touch a database.
+    #
+    # Tolerant of failure for the same reason as the model load: a tool
+    # that refuses to start because it cannot write its audit log
+    # protects nothing at all. Detection works without persistence; the
+    # dashboard is simply empty.
+    try:
+        session.create_tables()
+        log.info("decision store ready at %s", session.database_url())
+    except Exception:  # noqa: BLE001
+        log.exception("could not open the decision store; decisions will not be persisted")
 
     yield
 

@@ -17,8 +17,17 @@ venv/
 *.key
 
 # ---- Database ----
-# The SQLite file contains real logged prompts. It is local-only data.
+# The decision store. It holds no prompt text — the schema has no
+# column that can — but it IS a record of when each user was warned or
+# blocked, which is local user data and not ours to commit.
+#
+# The -wal and -shm files matter as much as the .db: SQLite buffers
+# recent writes in the write-ahead log, so committing only the .db
+# while ignoring the WAL would be the same mistake in a subtler form.
+data/
 *.db
+*.db-wal
+*.db-shm
 *.sqlite
 *.sqlite3
 

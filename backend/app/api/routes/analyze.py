@@ -16,8 +16,9 @@ later is a new router, not a search-and-replace.
 
 import logging
 
-from fastapi import APIRouter
+from fastapi import APIRouter, BackgroundTasks
 
+from ...db import events as event_store
 from ...pipeline import orchestrator
 from ...schemas.analyze import AnalyzeRequest, AnalyzeResponse
 
@@ -27,7 +28,7 @@ router = APIRouter(prefix="/api/v1", tags=["analysis"])
 
 
 @router.post("/analyze", response_model=AnalyzeResponse)
-def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
+def analyze(request: AnalyzeRequest, background: BackgroundTasks) -> AnalyzeResponse:
     """Inspect a message the user is about to send, and rule on it.
 
     The extension has already cancelled the send and is holding the
@@ -62,6 +63,26 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
         result.score,
         [e.type for e in result.entities],
         result.latency_ms,
+    )
+
+    # ---- Persist AFTER the response has been sent ----------------
+    # A BackgroundTask runs once the response is on its way, so the
+    # database write is not in the user's path. That matters here more
+    # than it usually would: the extension is holding a cancelled send
+    # and the person is staring at a composer that has not responded,
+    # so every millisecond spent here is one they experience.
+    #
+    # The write is passed METADATA and the response — never the request
+    # and never the text. `char_count` is computed here so that
+    # `record_decision` never has to accept the content at all.
+    background.add_task(
+        event_store.record_decision,
+        result,
+        user_id=request.user_id,
+        platform=request.platform,
+        trigger=request.trigger,
+        client_version=request.client_version,
+        char_count=len(request.text),
     )
 
     return result

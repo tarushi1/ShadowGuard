@@ -1,0 +1,38 @@
+# ShadowGuard AI — Python dependencies
+# ================================================================
+#
+#   python -m venv .venv
+#   .venv/bin/pip install -r requirements.txt
+#   .venv/bin/python -m spacy download en_core_web_md
+#
+# That last line is not optional and is not installable from here:
+# spaCy models are downloaded, not pip-resolved. Omitting it leaves
+# Stage 2 silently unavailable — the app still starts, because a
+# missing model must degrade one stage rather than stop the process.
+#
+# Versions are PINNED. This project's output is a set of measured
+# numbers, and a dependency that drifts changes them without anyone
+# editing a line of code. `>=` here would mean the recall figure in the
+# report could not be reproduced six months later.
+
+# ---- Web ----
+fastapi==0.115.14
+uvicorn==0.32.1
+pydantic==2.13.4
+
+# ---- Detection ----
+# Presidio pulls spaCy itself, but the version is pinned explicitly
+# because the NER model is chosen against it — see D28 on why the
+# entity allowlist and the model size were measured together.
+presidio-analyzer==2.2.364
+spacy==3.8.14
+
+# ---- Persistence ----
+# 2.x for the typed declarative API (Mapped / mapped_column). The 1.x
+# style still works in 2.0, which makes it easy to copy an old snippet
+# and lose every type annotation the models depend on.
+SQLAlchemy==2.0.51
+
+# ---- Tests ----
+pytest==8.4.2
+httpx==0.28.1
