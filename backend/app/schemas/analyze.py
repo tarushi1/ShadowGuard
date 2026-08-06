@@ -30,6 +30,21 @@ from pydantic import BaseModel, Field
 # 30-page document.
 MAX_TEXT_LENGTH = 100_000
 
+# Images arrive on their own endpoint as a multipart upload, NOT as
+# base64 inside this schema — the placeholder that used to sit here was
+# removed in Week 6 rather than left as an unused field in a published
+# contract.
+#
+# Base64 would have kept one endpoint at the cost of a 33% size
+# increase and a schema in which one field caps at 100k characters
+# while another routinely carries several megabytes. Images and text
+# differ in size, validation and failure modes; one endpoint pretending
+# otherwise makes both harder to reason about.
+#
+# 8 MB comfortably covers a 4K screenshot as PNG and refuses anything
+# that is really a file transfer.
+MAX_IMAGE_BYTES = 8 * 1024 * 1024
+
 
 class Action(str, Enum):
     """What the extension should do with this message.
@@ -99,11 +114,6 @@ class AnalyzeRequest(BaseModel):
         description="The prompt the user is about to send.",
     )
 
-    image_b64: str | None = Field(
-        default=None,
-        description="Base64 image for OCR. Unused until Week 6.",
-    )
-
     user_id: str = Field(
         max_length=128,
         description=(
@@ -136,6 +146,32 @@ class AnalyzeRequest(BaseModel):
             "line in the logs rather than as mysterious behaviour."
         ),
     )
+
+
+class OcrInfo(BaseModel):
+    """What Stage 3 read, described without quoting it.
+
+    Every field here is a MEASUREMENT of the extracted text rather than
+    the text itself — the same rule the decision store follows (D41).
+    `characters` tells you how much was read; nothing tells you what.
+
+    Returned so the modal can say "we read 214 characters from this
+    image at 89% confidence", which is the difference between a warning
+    a user can evaluate and one they have to take on faith.
+    """
+
+    characters: int = Field(description="How much text was read. Not the text.")
+    words: int
+    confidence: float = Field(
+        ge=0.0, le=1.0,
+        description=(
+            "Mean per-word OCR confidence. REPORTED, never acted on: a low "
+            "value means treat a non-detection here with suspicion, and using "
+            "it to skip analysis would turn a blurry screenshot into a bypass."
+        ),
+    )
+    width: int
+    height: int
 
 
 class AnalyzeResponse(BaseModel):
@@ -186,6 +222,11 @@ class AnalyzeResponse(BaseModel):
             "visible: when Stage 1 finds a critical secret the pipeline skips "
             "Stage 2, and this field is the evidence."
         ),
+    )
+
+    ocr: OcrInfo | None = Field(
+        default=None,
+        description="Present only when the input was an image (Stage 3).",
     )
 
     reasons: list[str] = Field(

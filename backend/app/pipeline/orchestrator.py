@@ -29,13 +29,15 @@ from dataclasses import dataclass
 
 from ..core import redactor, risk
 from ..core.policy import DEFAULT_POLICY, RiskPolicy
-from ..detectors import entropy_detector, regex_detector, semantic_detector
+from ..detectors import entropy_detector, ocr, regex_detector, semantic_detector
 from ..detectors.base import Finding, highest_severity, resolve_overlaps
+from ..detectors.ocr import OcrResult
 from ..schemas.analyze import (
     Action,
     AnalyzeRequest,
     AnalyzeResponse,
     DetectedEntity,
+    OcrInfo,
     RiskLevel,
 )
 
@@ -248,7 +250,108 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
     )
 
 
-def _describe(findings: list[Finding], action: Action) -> str:
+def analyze_image(
+    image_bytes: bytes,
+    *,
+    policy: RiskPolicy = DEFAULT_POLICY,
+) -> tuple[AnalyzeResponse, OcrResult]:
+    """Read an image, then run the ordinary pipeline over what it says.
+
+    Stage 3 is a text SOURCE, not a detector (D41), so the only thing
+    that differs from `analyze()` is where the text came from. Every
+    rule, threshold and policy below this line is the same one that
+    handles typed input — which means every improvement to Stage 1
+    improves image handling for free.
+
+    Returns the OCR result alongside the response so the caller can
+    record its METADATA. Deliberately not folded into the response: the
+    extracted text must reach the detectors and nothing else, and
+    returning it separately keeps the route's access to it explicit
+    rather than incidental.
+
+    :param image_bytes: the raw upload
+    :raises ValueError: on an unusable image
+    :raises RuntimeError: when Tesseract is not installed
+    """
+    started = time.perf_counter()
+    request_id = uuid.uuid4().hex[:12]
+
+    extracted = ocr.extract_text(image_bytes)
+
+    # An image with no legible text is not a pass — it is an absence of
+    # evidence. Returning `allow` here is correct, and the OCR
+    # confidence travels back so the user can see the difference
+    # between "we read this and it was fine" and "we could not read
+    # this". Treating them as the same thing is how a blurry screenshot
+    # becomes a bypass.
+    result = run_stages(extracted.text, policy=policy) if extracted.text.strip() else None
+
+    if result is None:
+        action, level, score = Action.ALLOW, RiskLevel.LOW, 0
+        findings, stages_run, reasons = [], ["ocr"], ()
+    else:
+        action, level, score = result.action, result.level, result.score
+        findings, reasons = result.findings, result.reasons
+        stages_run = ["ocr", *result.stages_run]
+
+        # ---- Redaction is not available for images ---------------
+        # The risk engine works on text and will happily return
+        # `redact`, because from its point of view a secret sits inside
+        # a sentence that survives its removal. It does — but the user
+        # is holding a PNG, and we cannot hand back an edited image we
+        # have any way to verify.
+        #
+        # Emitting `redact` anyway is the specific failure D35 warned
+        # about: an action the client cannot perform. The content
+        # script guards on `redacted_text` being present and would fall
+        # back to a warning, so nothing would break — it would just be
+        # the server telling a lie the client happens to catch.
+        #
+        # Downgrading to `warn` unconditionally would be worse than the
+        # lie: a critical key that would BLOCK as text would merely warn
+        # as a screenshot, making the image path the weaker one and
+        # rewarding exactly the bypass B11 describes. So the score
+        # decides, using the same threshold as everything else.
+        if action is Action.REDACT:
+            action = Action.BLOCK if score >= policy.block_threshold else Action.WARN
+
+    entities = [
+        DetectedEntity(
+            type=f.type, start=f.start, end=f.end, score=f.score, detector=f.detector
+        )
+        for f in findings
+    ]
+
+    latency_ms = (time.perf_counter() - started) * 1000
+
+    response = AnalyzeResponse(
+        request_id=request_id,
+        action=action,
+        level=level,
+        score=score,
+        entities=entities,
+        message=_describe(findings, action, from_image=True),
+        # Redaction is not offered for images. Editing pixels is a
+        # different problem from editing a string, and handing back a
+        # "redacted" image we cannot verify would be worse than
+        # refusing — see D43.
+        redacted_text=None,
+        ocr=OcrInfo(
+            characters=len(extracted.text),
+            words=extracted.word_count,
+            confidence=round(extracted.confidence, 3),
+            width=extracted.width,
+            height=extracted.height,
+        ),
+        latency_ms=round(latency_ms, 3),
+        stages_run=stages_run,
+        reasons=list(reasons),
+    )
+
+    return response, extracted
+
+
+def _describe(findings: list[Finding], action: Action, *, from_image: bool = False) -> str:
     """Write the sentence the user reads in the modal.
 
     Names the entity TYPES and never the matched values. A warning
@@ -261,8 +364,14 @@ def _describe(findings: list[Finding], action: Action) -> str:
     enough to make an actual decision, which is the difference between
     a control people respect and one they learn to dismiss.
     """
+    where = " in this image" if from_image else ""
+
     if not findings:
-        return "No sensitive content detected."
+        return (
+            "No sensitive text was found in this image."
+            if from_image
+            else "No sensitive content detected."
+        )
 
     # Preserve first-appearance order rather than sorting: it matches
     # what the user sees in their own message.
@@ -276,11 +385,11 @@ def _describe(findings: list[Finding], action: Action) -> str:
 
     if action is Action.BLOCK:
         return (
-            f"This message contains {listed}. Sending has been blocked — "
+            f"This message contains {listed}{where}. Sending has been blocked — "
             f"remove it before trying again."
         )
 
     return (
-        f"This message appears to contain {listed}. "
+        f"This message appears to contain {listed}{where}. "
         f"Review it before sending."
     )

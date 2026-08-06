@@ -105,6 +105,24 @@ class DecisionEvent(Base):
     """
 
     platform: Mapped[str] = mapped_column(String(32), index=True)
+
+    source: Mapped[str] = mapped_column(String(8), default="text", index=True)
+    """`text` or `image`.
+
+    Indexed because the question "is the image path weaker than the
+    text path?" is one the report has to answer with data, and B11 says
+    the answer is yes. Without this column the two are indistinguishable
+    after the fact.
+    """
+
+    ocr_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ocr_words: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    image_width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    image_height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    """Measurements of the image and of what was read from it — never
+    the pixels, never the extracted text (D41). Enough to notice that
+    low-confidence reads correlate with non-detection; useless for
+    reconstructing anything."""
     trigger: Mapped[str | None] = mapped_column(String(32), nullable=True)
     client_version: Mapped[str | None] = mapped_column(String(16), nullable=True)
     """Which extension build produced this. Mismatches between

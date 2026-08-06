@@ -40,6 +40,12 @@ spacy==3.8.14
 pytesseract==0.3.13
 Pillow==12.3.0
 
+# Multipart form parsing, for the image upload endpoint. FastAPI needs
+# it present to accept UploadFile at all and fails at import time
+# without it, which is a confusing way to learn about a missing
+# dependency.
+python-multipart==0.0.32
+
 # ---- Persistence ----
 # 2.x for the typed declarative API (Mapped / mapped_column). The 1.x
 # style still works in 2.0, which makes it easy to copy an old snippet

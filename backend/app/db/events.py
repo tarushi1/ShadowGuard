@@ -31,6 +31,7 @@ def record_decision(
     char_count: int,
     trigger: str | None = None,
     client_version: str | None = None,
+    source: str = "text",
 ) -> None:
     """Persist one verdict.
 
@@ -58,6 +59,11 @@ def record_decision(
                     platform=platform,
                     trigger=trigger,
                     client_version=client_version,
+                    source=source,
+                    ocr_confidence=response.ocr.confidence if response.ocr else None,
+                    ocr_words=response.ocr.words if response.ocr else None,
+                    image_width=response.ocr.width if response.ocr else None,
+                    image_height=response.ocr.height if response.ocr else None,
                     action=response.action.value,
                     level=response.level.value,
                     score=response.score,

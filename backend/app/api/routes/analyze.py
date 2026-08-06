@@ -16,11 +16,12 @@ later is a new router, not a search-and-replace.
 
 import logging
 
-from fastapi import APIRouter, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
+from fastapi.concurrency import run_in_threadpool
 
 from ...db import events as event_store
 from ...pipeline import orchestrator
-from ...schemas.analyze import AnalyzeRequest, AnalyzeResponse
+from ...schemas.analyze import MAX_IMAGE_BYTES, AnalyzeRequest, AnalyzeResponse
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +84,99 @@ def analyze(request: AnalyzeRequest, background: BackgroundTasks) -> AnalyzeResp
         trigger=request.trigger,
         client_version=request.client_version,
         char_count=len(request.text),
+    )
+
+    return result
+
+
+@router.post("/analyze/image", response_model=AnalyzeResponse)
+async def analyze_image(
+    background: BackgroundTasks,
+    file: UploadFile = File(description="Screenshot or pasted image to inspect."),
+    user_id: str = Form(...),
+    platform: str = Form("chatgpt"),
+    trigger: str | None = Form(None),
+    client_version: str | None = Form(None),
+) -> AnalyzeResponse:
+    """Inspect an image the user is about to send.
+
+    A separate endpoint rather than a field on `/analyze`, because
+    images and text differ in size, validation and failure modes. A
+    schema whose text field caps at 100k characters while a sibling
+    routinely carries several megabytes is one that has stopped
+    describing anything.
+
+    `async def` here, unlike the text endpoint. Reading an upload is
+    genuinely I/O-bound and `await file.read()` releases the event loop
+    while the browser streams; the CPU-bound OCR that follows is then
+    handed to a worker thread explicitly. Marking this `def` would
+    block the loop for the whole upload.
+
+    Nothing is written to disk at any point. The bytes go from the
+    request into memory, through Tesseract, and out of scope when this
+    returns — only entity types and measurements survive (D41).
+    """
+    payload = await file.read()
+
+    # Checked AFTER reading, which is a real limitation and is stated
+    # rather than hidden: FastAPI has already buffered the upload by
+    # this point, so an oversized file has cost memory before it is
+    # refused. Enforcing it earlier means a middleware reading
+    # Content-Length, which a client controls and can lie about. For a
+    # localhost prototype the buffered cost is acceptable; a deployed
+    # version would cap it at the reverse proxy, where the limit cannot
+    # be argued with.
+    if len(payload) > MAX_IMAGE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"image exceeds {MAX_IMAGE_BYTES // (1024 * 1024)}MB",
+        )
+
+    if not payload:
+        raise HTTPException(status_code=422, detail="empty upload")
+
+    try:
+        # Off the event loop. OCR is CPU-bound and takes ~200ms on a
+        # screenshot; running it inline would stall every other request
+        # for that whole time.
+        result, extracted = await run_in_threadpool(orchestrator.analyze_image, payload)
+    except RuntimeError as error:
+        # Tesseract missing. A 503 rather than a 500: the service is
+        # fine, one capability is unavailable, and the distinction is
+        # what tells an operator to install a package rather than to
+        # read a stack trace.
+        logger.error("OCR unavailable: %s", error)
+        raise HTTPException(status_code=503, detail="OCR is not available") from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    # Logs the SHAPE of what was read, never a word of it.
+    logger.info(
+        "analyze-image id=%s user=%s platform=%s bytes=%d %dx%d "
+        "ocr_words=%d ocr_conf=%.2f action=%s score=%d entities=%s latency=%.2fms",
+        result.request_id,
+        user_id,
+        platform,
+        len(payload),
+        extracted.width,
+        extracted.height,
+        extracted.word_count,
+        extracted.confidence,
+        result.action.value,
+        result.score,
+        [e.type for e in result.entities],
+        result.latency_ms,
+    )
+
+    background.add_task(
+        event_store.record_decision,
+        result,
+        user_id=user_id,
+        platform=platform,
+        trigger=trigger,
+        client_version=client_version,
+        char_count=len(extracted.text),
+        source="image",
     )
 
     return result
