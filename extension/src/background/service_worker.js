@@ -76,6 +76,89 @@ async function getUserId() {
  * @param {object} payload  the AnalyzeRequest body
  * @returns {Promise<{ok: true, verdict: object} | {ok: false, error: string}>}
  */
+/**
+ * Send an image for analysis.
+ *
+ * WHY THE IMAGE ARRIVES HERE AS BASE64
+ * ------------------------------------
+ * `chrome.runtime.sendMessage` serialises through JSON, so a Blob or
+ * an ArrayBuffer does not survive the content-script-to-worker hop —
+ * it arrives as `{}`, silently, with no error anywhere.
+ *
+ * Which is worth noting against the decision NOT to use base64 for the
+ * HTTP hop: the two hops have different constraints. Over HTTP we
+ * control both ends and multipart avoids a 33% size penalty; over
+ * Chrome's message channel there is no choice. The penalty is paid
+ * once, in memory, on a local machine — and the request that leaves
+ * this worker is still multipart.
+ *
+ * @param {object} payload  {image_b64, mime, platform, trigger, ...}
+ */
+async function requestImageAnalysis(payload) {
+  const url = `${SG.CONFIG.BACKEND_URL}${SG.CONFIG.ANALYZE_IMAGE_PATH}`;
+
+  // A far longer budget than text. OCR on a screenshot is ~200-400ms
+  // of real CPU work against ~4ms for text, and aborting a request
+  // that was going to succeed shows the user "offline" for a backend
+  // that is running perfectly.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SG.CONFIG.IMAGE_TIMEOUT_MS);
+
+  const startedAt = performance.now();
+
+  try {
+    // Base64 back to bytes. atob gives a binary string; Uint8Array.from
+    // with charCodeAt is the standard way to get real bytes out of it,
+    // because a JS string is UTF-16 and would otherwise corrupt every
+    // byte above 0x7F — which is most of a PNG.
+    const binary = atob(payload.image_b64);
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+
+    const form = new FormData();
+    form.append("file", new Blob([bytes], { type: payload.mime }), "upload");
+    form.append("user_id", payload.user_id);
+    form.append("platform", payload.platform ?? "chatgpt");
+    if (payload.trigger) form.append("trigger", payload.trigger);
+    if (payload.client_version) form.append("client_version", payload.client_version);
+
+    // No Content-Type header set by hand. fetch() derives it from the
+    // FormData along with the multipart boundary, and setting it
+    // manually omits that boundary — which the server rejects with a
+    // parse error that looks nothing like its cause.
+    const response = await fetch(url, {
+      method: "POST",
+      body: form,
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      return { ok: false, error: `backend returned HTTP ${response.status}` };
+    }
+
+    const verdict = await response.json();
+    const roundTripMs = Math.round(performance.now() - startedAt);
+
+    console.log(
+      `${TAG} image verdict ${verdict.action} score=${verdict.score} ` +
+      `ocr=${verdict.ocr?.words ?? 0}w conf=${verdict.ocr?.confidence ?? 0} ` +
+      `server=${verdict.latency_ms}ms roundtrip=${roundTripMs}ms id=${verdict.request_id}`
+    );
+
+    return { ok: true, verdict, roundTripMs };
+  } catch (error) {
+    const reason =
+      error.name === "AbortError"
+        ? `no response within ${SG.CONFIG.IMAGE_TIMEOUT_MS}ms`
+        : error.message;
+
+    console.warn(`${TAG} image analysis failed — ${reason}`);
+    return { ok: false, error: reason };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+
 async function requestAnalysis(payload) {
   const url = `${SG.CONFIG.BACKEND_URL}${SG.CONFIG.ANALYZE_PATH}`;
 
@@ -172,6 +255,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         echo: message.payload ?? null,
         workerVersion: chrome.runtime.getManifest().version,
       });
+      break;
+    }
+
+    case SG.MSG.ANALYZE_IMAGE: {
+      (async () => {
+        const userId = await getUserId();
+        const result = await requestImageAnalysis({ ...message.payload, user_id: userId });
+        sendResponse(result);
+      })();
+
       break;
     }
 

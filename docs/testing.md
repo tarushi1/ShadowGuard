@@ -111,6 +111,12 @@ Backend must be running for rows 1–5.
 | 22 | Type `our client Deborah Alvarez is threatening to sue` | 🟠 **warn** score 40 — no identifier at all; caught because the name is a *data subject*, not a topic |
 | 23 | Type `explain how Satya Nadella restructured Microsoft` | **No modal** — same entity types as row 22, decided by context |
 | 24 | `await __sg.tryReplace()` with text in the box | `selection covered N chars … REPLACED correctly`, where N is the length of what was there |
+| 25 | **Paste a screenshot** containing no secrets (Cmd+Shift+4, then Cmd+V) | Amber `IMAGE HELD`, then the image appears in the composer as normal. Server logs `analyze-image … action=allow` |
+| 26 | Screenshot a terminal showing `AKIAIOSFODNN7EXAMPLE`, paste it | 🟣 **block** modal. Preview reads `image · WxH · N words read at N% confidence` — **never the text itself**. The image does NOT attach |
+| 27 | Same, then **Cancel** | Nothing attaches; the composer is unchanged |
+| 28 | Attach the same screenshot via the **+ button** | Same verdict, `trigger: file-input`. The file picker's selection is discarded |
+| 29 | Paste ordinary **text** while the extension is loaded | Pastes normally. Breaking this breaks copy-paste for the whole site |
+| 30 | Stop the backend, paste an image | ⬜ grey "could not check this image" modal, sending focused |
 
 ### The rows that matter most
 
@@ -130,6 +136,11 @@ Backend must be running for rows 1–5.
   ([D39](decisions.md)).
 - **22 vs 23** — identical entity types, opposite verdicts. The clearest demonstration the project
   has, and it takes ten seconds to show at a demo.
+- **26** — the whole reason images are intercepted at ATTACH rather than at send (D43). If this
+  warns but the image still appears in the composer, the bytes have already reached ChatGPT's
+  servers and the warning is theatre.
+- **29** — the image listener sees *every* paste on the page. Cancelling an ordinary text paste
+  would break the site more thoroughly than any false positive.
 
 ---
 

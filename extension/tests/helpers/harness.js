@@ -131,15 +131,69 @@ function polyfill(window) {
     });
   }
 
-  // DataTransfer, used to carry text into a synthetic paste.
+  // DataTransfer, used to carry text into a synthetic paste AND files
+  // into an image replay. `items.add()` and the `files` list are both
+  // load-bearing: setting `input.files` from a DataTransfer is the only
+  // supported way to put a File into an input programmatically, and the
+  // image interceptor's replay depends on it.
   if (!window.DataTransfer) {
     window.DataTransfer = class DataTransfer {
       #data = new Map();
+      #files = [];
+
+      constructor() {
+        this.items = {
+          add: (file) => {
+            this.#files.push(file);
+          },
+        };
+      }
+
+      get files() {
+        return this.#files;
+      }
+
       setData(type, value) {
         this.#data.set(type, String(value));
       }
+
       getData(type) {
         return this.#data.get(type) ?? "";
+      }
+    };
+  }
+
+  // `input.files` must be a real FileList in JSDOM, and a FileList
+  // cannot be constructed from JavaScript — the only way to make one
+  // in a browser is via DataTransfer, which JSDOM does not implement
+  // either. So the property is relaxed to accept any array-like.
+  //
+  // This is a genuine gap between the harness and the browser, and it
+  // is worth naming: in Chrome, `input.files = transfer.files` works
+  // because DataTransfer.files IS a FileList. Here it works because
+  // the check has been removed. A test that passes on this polyfill
+  // therefore proves the interceptor's LOGIC, not that the assignment
+  // is legal — which is one more reason browser verification stays a
+  // required step.
+  Object.defineProperty(window.HTMLInputElement.prototype, "files", {
+    configurable: true,
+    get() {
+      return this.__files ?? [];
+    },
+    set(value) {
+      this.__files = value ? [...value] : [];
+    },
+  });
+
+  // A minimal File. JSDOM has one, but not always with a usable `type`
+  // on a plain construction, and the interceptor filters on exactly
+  // that.
+  if (!window.File) {
+    window.File = class File extends window.Blob {
+      constructor(bits, name, options = {}) {
+        super(bits, options);
+        this.name = name;
+        this.type = options.type ?? "";
       }
     };
   }

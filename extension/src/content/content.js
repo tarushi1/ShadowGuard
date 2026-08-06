@@ -264,6 +264,120 @@
     else approve();
   }
 
+  // ---------------------------------------------------------------
+  // Image interception
+  // ---------------------------------------------------------------
+  const imageInterceptor = new SG.ImageInterceptor(adapter, handleImage);
+  imageInterceptor.start();
+
+  /**
+   * Decide whether one attached image may go through.
+   *
+   * Runs at ATTACH time, not send time, and the difference is the
+   * whole point: by send time ChatGPT has already uploaded the file to
+   * its own servers and the composer holds only a remote reference.
+   * The bytes would have left the machine before we ever looked.
+   *
+   * @param {File} file
+   * @param {{trigger: string}} context
+   * @returns {Promise<boolean>} true to let it through
+   */
+  async function handleImage(file, context) {
+    if (modal.isOpen) {
+      console.debug(`${TAG} a decision is already pending — dropping this image.`);
+      return false;
+    }
+
+    // Checked here as well as on the server. Uploading eight megabytes
+    // to be told 413 wastes the user's time on a request that could
+    // only ever fail.
+    if (file.size > SG.CONFIG.MAX_IMAGE_BYTES) {
+      const decision = await modal.show({
+        variant: "offline",
+        message:
+          `This image is ${(file.size / 1024 / 1024).toFixed(1)}MB, larger than ` +
+          `ShadowGuard can inspect. It has NOT been checked for sensitive content.`,
+        allowProceed: SG.CONFIG.FAIL_MODE === "open",
+      });
+
+      return decision === "proceed";
+    }
+
+    const started = performance.now();
+    const result = await chrome.runtime.sendMessage({
+      type: SG.MSG.ANALYZE_IMAGE,
+      payload: {
+        image_b64: await toBase64(file),
+        mime: file.type,
+        platform: adapter.id,
+        trigger: context.trigger,
+        client_version: VERSION,
+      },
+    });
+
+    // ---- Backend unreachable: fail open, but visibly -------------
+    if (!result?.ok) {
+      console.warn(`${TAG} could not analyse image — ${result?.error ?? "no response"}`);
+
+      const decision = await modal.show({
+        variant: "offline",
+        message:
+          "ShadowGuard could not check this image for sensitive content. " +
+          "Attach it only if you are confident it is safe.",
+        allowProceed: SG.CONFIG.FAIL_MODE === "open",
+      });
+
+      return decision === "proceed";
+    }
+
+    const verdict = result.verdict;
+
+    console.log(
+      `${TAG} image (${context.trigger}) → ${verdict.action.toUpperCase()} ` +
+      `(score ${verdict.score}, read ${verdict.ocr?.words ?? 0} words at ` +
+      `${Math.round((verdict.ocr?.confidence ?? 0) * 100)}% confidence, ` +
+      `${Math.round(performance.now() - started)}ms, id ${verdict.request_id})`
+    );
+
+    if (verdict.action === SG.ACTION.ALLOW) return true;
+
+    const decision = await modal.show({
+      level: verdict.level,
+      score: verdict.score,
+      entities: [...new Set(verdict.entities.map((e) => e.type))],
+      message: verdict.message,
+
+      // What was READ, never what it said. The modal is on a page we
+      // do not own, and putting the extracted text on screen would
+      // display the secret we just found — the same mistake as logging
+      // it, with an audience.
+      preview:
+        `image · ${verdict.ocr?.width}×${verdict.ocr?.height} · ` +
+        `${verdict.ocr?.words ?? 0} words read at ` +
+        `${Math.round((verdict.ocr?.confidence ?? 0) * 100)}% confidence`,
+
+      allowProceed: verdict.action !== SG.ACTION.BLOCK,
+    });
+
+    return decision === "proceed";
+  }
+
+  /**
+   * A File as base64, without the data-URL prefix.
+   *
+   * `chrome.runtime.sendMessage` serialises through JSON, so a Blob
+   * does not survive the hop to the service worker — it arrives as an
+   * empty object, with no error anywhere.
+   */
+  function toBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(reader.error);
+      reader.onload = () => resolve(String(reader.result).split(",", 2)[1] ?? "");
+      reader.readAsDataURL(file);
+    });
+  }
+
   /** Trim the user's text to something that fits the modal. */
   function previewOf(text) {
     return text.length > 160 ? `${text.slice(0, 160)}…` : text;
@@ -523,6 +637,9 @@
 
     /** Where would send() route right now? Useful when replay misbehaves. */
     sendButton: () => adapter.findSendButton(),
+
+    /** The image interceptor — paste and file-input paths. */
+    imageInterceptor,
 
     /** The modal instance. Its shadow root is closed, so this is the only handle. */
     modal,

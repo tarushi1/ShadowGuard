@@ -53,6 +53,16 @@ globalThis.SG.MSG = Object.freeze({
   // visible as a whole; nothing handles these yet.
   ANALYZE_REQUEST: "SG_ANALYZE_REQUEST",
   ANALYZE_RESULT: "SG_ANALYZE_RESULT",
+
+  /**
+   * An image the user is trying to attach.
+   *
+   * A separate type rather than a flag on ANALYZE_REQUEST, because the
+   * payload, the endpoint and the failure modes are all different — and
+   * a message type that means two things is the kind of ambiguity this
+   * file exists to prevent.
+   */
+  ANALYZE_IMAGE: "SG_ANALYZE_IMAGE",
   USER_DECISION: "SG_USER_DECISION",
 });
 

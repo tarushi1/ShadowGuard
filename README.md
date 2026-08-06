@@ -32,12 +32,12 @@ It computes a risk score and decides whether to **allow**, **warn**, **redact**,
 
 | | |
 |---|---|
-| **Last updated** | 2026-08-05 |
+| **Last updated** | 2026-08-07 |
 | **Project root** | `/Users/arushitiwari/Desktop/ShadowGuard` |
 | **Git branch** | `main` (56 commits, working tree clean) |
 | **Current stage** | Stages 0, 1, 2, risk engine, redaction and persistence all live. **Recall 98% at 0% FPR.** |
-| **Completed** | **Weeks 1–5 complete**; 6.1 OCR done and measured. |
-| **Next task** | **6.2 — extension-side image capture (the deferred task 2.6)** |
+| **Completed** | **Weeks 1–5 complete**; 6.1 OCR, 6.2 image capture. Task 2.6 finally closed. |
+| **Next task** | **6.3 — the Gemini adapter** |
 | **Deadline** | ~2026-09-20 (8 weeks from 2026-07-26) |
 | **Weeks elapsed** | ~0.6 of 8 — **well ahead of plan** |
 
@@ -47,7 +47,7 @@ Loading `extension/` unpacked into Chrome and opening `chatgpt.com` produces, in
 
 ```
  [ShadowGuard] ACTIVE            ← green badge
-[ShadowGuard] version    : 0.9.3
+[ShadowGuard] version    : 0.10.0
 [ShadowGuard] host       : chatgpt.com
 [ShadowGuard] frame      : top-level
 [ShadowGuard] adapter    : ChatGPT (chatgpt)
@@ -613,7 +613,7 @@ Every task is independently testable — you know it works before moving on.
 | 2.3 Replay the send programmatically after approval | Message sends after a fake "approve" | ✅ |
 | 2.4 Inject the modal UI (Shadow DOM) | Modal renders correctly over the page | ✅ |
 | 2.5 Wire modal → Cancel discards, Proceed sends | Full loop works with a hardcoded verdict | ✅ |
-| 2.6 Paste and image-upload interception | Console shows pasted text and file bytes | ⏭️ **deferred to Week 6** — see note |
+| 2.6 Paste and image-upload interception | Console shows pasted text and file bytes | ✅ **closed in 6.2** |
 
 > **Why 2.6 is deferred.** Pasted text needs no special handling: the interceptor reads the
 > composer at *send* time, so it sees pasted content exactly as it sees typed content — already

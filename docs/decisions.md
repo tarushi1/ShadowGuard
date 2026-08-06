@@ -1011,6 +1011,61 @@ was measured. **Four of six correct.**
 
 ---
 
+## D43 — Images are intercepted at ATTACH, not at send
+
+**Context.** Text is intercepted at send: the user presses Enter, we cancel, analyse, and replay.
+The obvious symmetry is to do the same for images — inspect everything at the moment of sending.
+
+**That would be too late, and not by a little.** When a user attaches an image, ChatGPT uploads it
+to its own servers immediately and puts a thumbnail in the composer referencing a remote id. By
+send time:
+
+- the bytes have already left the machine
+- the composer holds a reference, not a file
+- there is nothing left for us to read, let alone stop
+
+Warning at send would mean reporting a leak that had already happened — the observe-and-warn
+design [D1](#d1--block-before-send-not-observe-and-warn) rejected in the first hour of this project.
+
+**Chosen:** intercept at attach, on two paths that need different handling.
+
+| Path | Mechanism | Why it differs |
+|---|---|---|
+| **Paste** | `paste` is cancellable — `preventDefault()` and the page never sees the file | The clean case |
+| **File input** | `change` is *not* meaningfully cancellable: the browser has already populated `input.files` and the page's handler is next. Emptying the input is what actually prevents the upload | Requires putting the file **back** on approval |
+
+**Consequence:** a separate `ImageInterceptor` rather than an extension of the text one. They cancel
+different things at different points in the user's flow, and merging them would produce one class
+with two unrelated lifecycles.
+
+**The replay problem returns, and is solved differently.** An approved image is re-dispatched, and
+without a marker the interceptor would catch its own replay forever. Keystrokes use `isTrusted`,
+which is unforgeable — but a replayed `File` is a perfectly ordinary object. A `WeakSet` of
+approved files serves instead: it holds no state that can get stuck, and entries vanish when the
+file is collected. Removing that guard makes the extension test suite fail with a stack overflow,
+which is the loop made visible.
+
+---
+
+## D44 — Base64 over the message channel, multipart over HTTP
+
+**Context.** [D41](#d41--stage-3-is-a-text-source-and-stores-nothing) rejected base64 for the HTTP
+hop and used multipart. The content script then has to get the image to the service worker, and
+`chrome.runtime.sendMessage` serialises through JSON — a `Blob` or `ArrayBuffer` arrives as `{}`,
+silently, with no error anywhere.
+
+**Chosen:** base64 for the content-script → worker hop, multipart from the worker onward.
+
+The apparent inconsistency is the point: **the two hops have different constraints.** Over HTTP we
+control both ends and multipart avoids a 33% size penalty on every screenshot. Over Chrome's
+message channel there is no choice at all. The penalty is paid once, in memory, on a local machine
+— and the request that actually leaves the worker is still multipart.
+
+Worth stating in the report because "why base64 here and not there?" is exactly the kind of
+question an examiner asks about an apparent contradiction.
+
+---
+
 ## Still open
 
 | Question | Decide by |

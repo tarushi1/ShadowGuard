@@ -24,6 +24,28 @@ globalThis.SG.CONFIG = Object.freeze({
   BACKEND_URL: "http://127.0.0.1:8000",
 
   ANALYZE_PATH: "/api/v1/analyze",
+  ANALYZE_IMAGE_PATH: "/api/v1/analyze/image",
+
+  /**
+   * Images get their own, longer budget.
+   *
+   * OCR on a screenshot takes ~200-400ms of real CPU work, against
+   * ~4ms for text. Reusing the 3s text timeout would abort a request
+   * that was going to succeed, and the user would see "offline" for a
+   * backend that is running perfectly.
+   */
+  IMAGE_TIMEOUT_MS: 15000,
+
+  /**
+   * Refuse to upload anything larger, without asking the backend.
+   *
+   * Mirrors MAX_IMAGE_BYTES in schemas/analyze.py. Checking here saves
+   * a pointless several-megabyte round trip that can only end in 413 —
+   * and the two numbers are asserted equal by a contract test, because
+   * a client limit that drifts above the server's produces a failure
+   * that looks like a network problem.
+   */
+  MAX_IMAGE_BYTES: 8 * 1024 * 1024,
   HEALTH_PATH: "/health",
 
   /**
