@@ -1066,6 +1066,48 @@ question an examiner asks about an apparent contradiction.
 
 ---
 
+## D45 — The second adapter revealed the first was carrying generic code
+
+**Context.** D2 claimed a second platform would be one new file that cannot break the first. Adding
+`gemini.js` tested that claim, and it failed immediately — but not in the way expected.
+
+**What actually happened.** The new adapter declared selectors, `readText` and `isEmpty`, and
+omitted `matchSendButton`, `findSendButton` and `send`. `registerAdapter` throws on a missing
+method, **and the throw escaped the adapter's IIFE and took down the content script for BOTH
+platforms.** The architecture that was supposed to make platforms independent had a shared failure
+point nobody had exercised, because there had only ever been one adapter.
+
+The extension test suite caught it in a single command, which is the fourth defect it has found
+since D40.
+
+**Chosen:** move the generic implementations into the registry as **defaults**, merged in before
+the required-key check. `findSendButton` is *"try each selector, skip disabled and hidden"*;
+`matchSendButton` is *"does the click target sit inside one of these"*; `send` is *"click it, or
+fall back to a synthetic Enter"*. **None of that was ever platform-specific** — it only knows about
+the selectors an adapter declares.
+
+With defaults in place, adding a platform really is one list of CSS selectors, which is what D2
+claimed and what a second adapter turned from a claim into a fact.
+
+**`chatgpt.js` was deliberately NOT refactored to use them.** It keeps its own versions, which
+handle a ChatGPT-specific case — excluding the STOP button that replaces send while a reply
+streams — and whose behaviour is pinned by tests that must keep passing unchanged. *Rewriting the
+working platform to tidy up the new one risks the thing that works to benefit the thing that does
+not.* All 49 existing tests passed unchanged after the change, which is the evidence that the claim
+held.
+
+**What is verified, and what is not.** The architecture is verified: the registry resolves Gemini,
+the interceptor and modal need no changes, ChatGPT is untouched, and tests assert all three. **The
+CSS selectors are not** — they are written from Gemini's published structure and the conventions
+Angular Material and Quill follow, and have never met the live site. That is stated in the
+adapter file itself rather than left for a marker to discover.
+
+The tiering is what makes the unverified part survivable: the console logs which tier matched, and
+anything below tier 2 means the adapter needs re-pointing rather than silently reading the wrong
+element.
+
+---
+
 ## Still open
 
 | Question | Decide by |

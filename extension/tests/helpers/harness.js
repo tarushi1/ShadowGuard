@@ -163,6 +163,38 @@ function polyfill(window) {
     };
   }
 
+  // offsetParent. JSDOM performs no layout, so this is `undefined` on
+  // every element — which means the adapters' visibility check
+  // (`offsetParent !== null`) rejects everything, including buttons a
+  // real browser would happily find.
+  //
+  // That check is not decoration: sites keep hidden fallback editors
+  // and disabled send buttons in the DOM, and latching onto one means
+  // reading a box the user never types in, or clicking a button that
+  // silently does nothing.
+  //
+  // The approximation below is display-based only. It cannot model
+  // visibility:hidden, zero dimensions, clipping, or an ancestor with
+  // `display:none` set via a stylesheet rather than inline — all of
+  // which occur in real pages. Another reason browser verification
+  // stays a required step.
+  // Defined unconditionally: JSDOM DOES declare offsetParent, it just
+  // always answers null. A presence check therefore skips the polyfill
+  // and leaves every element looking hidden — which cost two failing
+  // tests and a confusing five minutes.
+  {
+    Object.defineProperty(window.HTMLElement.prototype, "offsetParent", {
+      configurable: true,
+      get() {
+        for (let node = this; node; node = node.parentElement) {
+          if (node.style?.display === "none" || node.hidden) return null;
+        }
+
+        return this.parentElement;
+      },
+    });
+  }
+
   // `input.files` must be a real FileList in JSDOM, and a FileList
   // cannot be constructed from JavaScript — the only way to make one
   // in a browser is via DataTransfer, which JSDOM does not implement

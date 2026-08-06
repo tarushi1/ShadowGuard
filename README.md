@@ -36,8 +36,8 @@ It computes a risk score and decides whether to **allow**, **warn**, **redact**,
 | **Project root** | `/Users/arushitiwari/Desktop/ShadowGuard` |
 | **Git branch** | `main` (56 commits, working tree clean) |
 | **Current stage** | Stages 0, 1, 2, risk engine, redaction and persistence all live. **Recall 98% at 0% FPR.** |
-| **Completed** | **Weeks 1–5 complete**; 6.1 OCR, 6.2 image capture. Task 2.6 finally closed. |
-| **Next task** | **6.3 — the Gemini adapter** |
+| **Completed** | **Weeks 1–6 complete.** Gemini adapter written but NOT verified live. |
+| **Next task** | **Week 7 — behavioural baseline (Stage 4), then the dashboard** |
 | **Deadline** | ~2026-09-20 (8 weeks from 2026-07-26) |
 | **Weeks elapsed** | ~0.6 of 8 — **well ahead of plan** |
 
@@ -47,7 +47,7 @@ Loading `extension/` unpacked into Chrome and opening `chatgpt.com` produces, in
 
 ```
  [ShadowGuard] ACTIVE            ← green badge
-[ShadowGuard] version    : 0.10.0
+[ShadowGuard] version    : 0.11.0
 [ShadowGuard] host       : chatgpt.com
 [ShadowGuard] frame      : top-level
 [ShadowGuard] adapter    : ChatGPT (chatgpt)

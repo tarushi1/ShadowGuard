@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ShadowGuard AI",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Context-aware multimodal data loss prevention for enterprise interactions with generative AI platforms.",
   "action": {
     "default_title": "ShadowGuard AI"
@@ -20,13 +20,15 @@
     {
       "matches": [
         "https://chatgpt.com/*",
-        "https://chat.openai.com/*"
+        "https://chat.openai.com/*",
+        "https://gemini.google.com/*"
       ],
       "js": [
         "src/shared/messages.js",
         "src/shared/config.js",
         "src/adapters/registry.js",
         "src/adapters/chatgpt.js",
+        "src/adapters/gemini.js",
         "src/content/composer_watcher.js",
         "src/content/interceptor.js",
         "src/content/image_interceptor.js",
