@@ -6,8 +6,79 @@ ShadowGuard sits between an employee and a browser-based generative-AI platform 
 and inspects everything — typed text, pasted text, uploaded images — *before* it is sent.
 It computes a risk score and decides whether to **allow**, **warn**, **redact**, or **block**.
 
-> **This README is the session-recovery document.** If a session expires or context is lost, read
-> this file first: it records the current state, every locked decision, and the exact next task.
+---
+
+## 🔴 If your AI session expired — start here
+
+**Paste this, exactly:**
+
+> Read `README.md` and `docs/decisions.md` in this repo, in that order, before doing anything else.
+> `README.md` is the session-recovery document: it has current state, the exact next task, and the
+> mentoring contract I work under. `docs/decisions.md` is the decision log (D1–D45) — every choice
+> and its reasoning, so you don't re-litigate settled decisions or contradict them. Then tell me
+> what you understand the next task to be, and wait for me to confirm before writing code.
+
+**Two files. That's it.** Everything else is reachable from them:
+
+| File | What it gives a fresh session |
+|---|---|
+| **`README.md`** | State, next task, roadmap, how to run everything, measured results, the mentoring contract |
+| **`docs/decisions.md`** | **D1–D45** — why every choice was made, and what was rejected. This is what stops a new session undoing settled work |
+
+If it needs more, point it at the [knowledge base index](docs/README.md) — but don't paste those
+up front. A session that reads everything before starting spends its context on history instead of
+on the work.
+
+**Do not paste code files.** The repo is on disk; the session can read what it needs. And check
+`git log --oneline -15` yourself if you want to see what actually happened recently — the commit
+messages carry the reasoning too.
+
+---
+
+## How to work on this project
+
+*Written for whoever picks this up — including a fresh AI session. This is the working
+agreement, not a preference.*
+
+**Arushi is the author and is learning.** Comfortable with Python and basic ML; had never built a
+Chrome extension, a FastAPI backend, an OCR pipeline, a DLP system, browser interception or an
+evaluation harness before this project. **Assume implementation details need explaining.**
+
+**Teach before implementing.** For anything non-trivial: what the goal is, the concept behind it,
+why it is needed, what the alternatives are and why they lose, then the code — with the reasoning
+attached rather than in a wall of unexplained lines.
+
+**Compare options, then recommend firmly.** A list of choices with no recommendation is not help.
+State the trade-off and pick one.
+
+**Ask when a decision is genuinely the author's.** Never make a silent assumption on something
+that changes the design — privacy trade-offs, thresholds, scope. Routine judgment calls should
+just be made.
+
+**One stage at a time, and verify before moving on.** Every task ends with something runnable and
+a way to check it.
+
+**Measure rather than assert.** This project is graded on quantitative evaluation. Any claim about
+a number belongs in `evaluation/`, run and reported — including when the result is bad. Four
+separate fixes to one bug were each "obviously correct" and each wrong ([D39](docs/decisions.md));
+the one that worked came from measuring instead of reasoning.
+
+**Teach debugging as a skill.** Explain what the symptom means and how to narrow it down, rather
+than silently replacing broken code.
+
+**It is a security project, so say the uncomfortable things.** Point out risks, false positives,
+false negatives, privacy concerns, ethical problems and limitations without being asked. Bypasses
+are tracked in [docs/security.md](docs/security.md) as **B1–B11**, several of which this design
+created on purpose. Volunteering a weakness is far stronger than being asked about it.
+
+**Keep `README.md` and `docs/` current at all times**, not at the end. Documentation drifts exactly
+like code, and only executable checks notice — which is why a few agreements are asserted by tests
+(manifest version vs `package.json`, `SG.ACTION` vs the Python enum).
+
+---
+
+> **This README is the session-recovery document.** It records current state, every locked
+> decision, and the exact next task.
 >
 > **📚 For how and why things work, see the [knowledge base in `docs/`](docs/README.md).**
 > This file tracks *state*; `docs/` explains *the system*. Both are kept current as work proceeds.
@@ -34,12 +105,14 @@ It computes a risk score and decides whether to **allow**, **warn**, **redact**,
 |---|---|
 | **Last updated** | 2026-08-07 |
 | **Project root** | `/Users/arushitiwari/Desktop/ShadowGuard` |
-| **Git branch** | `main` (56 commits, working tree clean) |
-| **Current stage** | Stages 0, 1, 2, risk engine, redaction and persistence all live. **Recall 98% at 0% FPR.** |
-| **Completed** | **Weeks 1–6 complete.** Gemini adapter written but NOT verified live. |
+| **Git branch** | `main` (63 commits, working tree clean) |
+| **Current stage** | Stages 0–3 live: interception, regex, entropy, semantic, OCR, risk engine, redaction, persistence — for text **and** images, on ChatGPT and (unverified) Gemini. |
+| **Completed** | **Weeks 1–6 complete.** Gemini adapter written but **not verified against the live site**. |
 | **Next task** | **Week 7 — behavioural baseline (Stage 4), then the dashboard** |
+| **Tests** | **231 Python** (`pytest -q`) · **60 JavaScript** (`npm test`) · extension **v0.11.0** |
+| **Measured** | text: recall **98%**, FPR **0%**, F1 **99%** · images: OCR retention **93.9%**, OCR-induced FPR **2.0%** |
 | **Deadline** | ~2026-09-20 (8 weeks from 2026-07-26) |
-| **Weeks elapsed** | ~0.6 of 8 — **well ahead of plan** |
+| **Weeks elapsed** | **1.7 of 8**, with 6 weeks of plan delivered — well ahead |
 
 ### What actually runs today
 
@@ -447,7 +520,7 @@ ShadowGuard/
 │   │   │                       cannot break our styling, or the page reach our buttons.
 │   │   └── shared/             message-type constants used by both worlds — prevents
 │   │                           typo'd message names failing silently.
-│   ├── tests/                  39 JSDOM tests. Every regression verified by re-introducing
+│   ├── tests/                  JSDOM tests. Every regression verified by re-introducing
 │   │                           its bug — see extension/tests/README.md.
 │   └── assets/icons/           toolbar icons (16/48/128px).  [empty — Week 8 polish]
 │
@@ -476,7 +549,7 @@ ShadowGuard/
 │   │   └── db/
 │   │       ├── session.py      Lazy engine, SQLite pragmas, transactional scope.
 │   │       └── events.py       The ONLY module that writes. Dashboard queries live here.
-│   └── tests/                  197 tests, incl. conftest.py isolating the database.
+│   └── tests/                  pytest suite, incl. conftest.py isolating the database.
 │
 ├── evaluation/                 ← your grade depends on this folder
 │   ├── data/corpus.jsonl       200 labelled samples, 100 sensitive / 100 benign.
@@ -664,7 +737,7 @@ Every task is independently testable — you know it works before moving on.
 |---|---|---|
 | 5.1 Risk engine: weighted fusion, tunable policy file | Recall 89% → 98% at 0% FPR | ✅ |
 | 5.2 Redaction: `redact` action and `redacted_text` | Secret removed, rest of the message survives | ✅ |
-| 5.3 Extension test harness (JSDOM) | 39 tests; each regression verified by re-introducing its bug | ✅ |
+| 5.3 Extension test harness (JSDOM) | Each regression verified by re-introducing its bug | ✅ |
 | 5.4 SQLAlchemy models + SQLite schema | Rows written; the database file itself is searched for secrets | ✅ |
 | 5.5 Event logging and dashboard-ready queries | Decisions queryable by user, action and entity type | ✅ |
 
@@ -721,7 +794,7 @@ whether the reload actually took.
 
 ```bash
 npm install     # once — pulls jsdom
-npm test        # 39 tests
+npm test        # the extension suite
 ```
 
 Runs against JSDOM in about a second, and covers the composer rewrite, the interception guards, the

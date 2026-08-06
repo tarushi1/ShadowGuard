@@ -16,8 +16,8 @@ uvicorn backend.app.main:app --reload
 **Terminal — tests:**
 ```bash
 cd ~/Desktop/ShadowGuard && source .venv/bin/activate
-pytest -q        # 181 — backend: detectors, risk engine, redaction, API contract
-npm test         # 39  — extension: adapter, interceptor, modal, cross-language contracts
+pytest -q        # backend: detectors, risk engine, redaction, persistence, API contract
+npm test         # extension: adapters, interceptors, modal, cross-language contracts
 ```
 
 Both, every time. They cover different halves and neither can see the other's failures — the two

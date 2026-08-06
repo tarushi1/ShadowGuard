@@ -2,7 +2,7 @@
 
 ```bash
 npm install     # once — pulls jsdom
-npm test        # 39 tests
+npm test
 ```
 
 Node's built-in runner (`node --test`) plus **jsdom**. No Jest, no Vitest, no build step: the
@@ -11,8 +11,8 @@ with a DOM on it loads them exactly as Chrome does.
 
 ## Why these exist
 
-The Python side had **181 tests and none of the bugs**. The extension had **zero tests and all
-three**:
+At the time, the Python side had **181 tests and none of the bugs**. The extension had **zero
+tests and all three**:
 
 | | Defect | Found by |
 |---|---|---|
