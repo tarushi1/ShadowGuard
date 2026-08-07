@@ -377,3 +377,94 @@ def test_unicode_does_not_crash_or_shift_offsets():
     finding = next(f for f in scan(text) if f.type == "AWS_ACCESS_KEY_ID")
 
     assert text[finding.start : finding.end] == "AKIAIOSFODNN7EXAMPLE"
+
+
+# ---------------------------------------------------------------
+# Credentials — the gap a real user found
+# ---------------------------------------------------------------
+
+def test_a_password_beside_its_label_is_detected():
+    """The gap that prompted this rule.
+
+    A user pasted a real password and watched it pass every stage.
+    Nothing in this file could have caught it: a password has NO
+    FORMAT, so no pattern matches, and a short lowercase-and-digit
+    string is below the entropy stage's 20-character minimum and would
+    fail its threshold anyway.
+    """
+    for text in (
+        "my password is Tr0ub4dorFake",
+        "this is my gmail password - Hunter2Fake",
+        "login: admin  pwd: letmein123",
+        "DB_PASSWORD: sup3rSecretFake",
+        "set MYSQL_PWD=abc123xyz in the env",
+    ):
+        assert "PASSWORD" in types_in(text), f"missed a credential in: {text}"
+
+
+def test_environment_variable_names_match_despite_the_underscore():
+    """`\\b` never fires after an underscore, because `_` is a word
+    character — so `MYSQL_PWD=` would not match a `\\b`-anchored rule.
+    Pasted config is exactly where credentials show up."""
+    assert "PASSWORD" in types_in("export DB_PASSWD=hunter2fake")
+
+
+def test_sentences_about_passwords_are_not_disclosures():
+    """A rule that fires on complaints about passwords is a rule people
+    switch off, taking the real detections with it — the argument in
+    B8, applied to credentials."""
+    for text in (
+        "my password is too short apparently",
+        "the password is wrong, can you help",
+        "your password is expired, reset it",
+        "how should we hash passwords, argon2id or bcrypt",
+        "set your password to something memorable",
+    ):
+        assert "PASSWORD" not in types_in(text), f"false positive on: {text}"
+
+
+def test_masked_and_placeholder_passwords_are_ignored():
+    """Flagging a placeholder trains people to dismiss the warning —
+    D17's rule applied to credentials."""
+    for text in ("password: ********", "password = <yourpassword>", "pwd: changeme"):
+        assert "PASSWORD" not in types_in(text), f"flagged a placeholder in: {text}"
+
+
+def test_hyphenated_words_are_not_read_as_disclosures():
+    """`-` is a separator only with spaces around it, so
+    `password-protected` stays one ordinary word."""
+    assert "PASSWORD" not in types_in("this is a password-protected document")
+    assert "PASSWORD" not in types_in("we need to bypass: the cache")
+
+
+def test_credentials_in_a_connection_string_are_critical():
+    """Unambiguous, unlike a labelled password: a colon-separated
+    secret before an @ in a URI is what a connection string IS."""
+    found = scan("db is postgres://appuser:s3cretFake@db.internal:5432/prod")
+    types = {f.type for f in found}
+
+    assert "CONNECTION_STRING_PASSWORD" in types
+    assert next(f for f in found if f.type == "CONNECTION_STRING_PASSWORD").severity == "critical"
+
+
+def test_only_the_secret_is_reported_not_the_label():
+    """`group=1` matters for redaction. Reporting the whole match would
+    redact to `[REDACTED: PASSWORD]` and lose the sentence; reporting
+    the group gives `password is [REDACTED: PASSWORD]`, which still
+    reads as something someone can answer."""
+    text = "my password is Tr0ub4dorFake"
+    finding = next(f for f in scan(text) if f.type == "PASSWORD")
+
+    assert finding.value == "Tr0ub4dorFake"
+    assert "password" not in text[finding.start:finding.end].lower()
+
+
+def test_a_password_is_high_not_critical():
+    """Every critical rule here is anchored to something unforgeable —
+    a vendor prefix, a PEM header, a checksum. This one rests on
+    English word order, and blocking on weak evidence is how a control
+    loses the authority to block on strong evidence."""
+    finding = next(f for f in scan("my password is Tr0ub4dorFake") if f.type == "PASSWORD")
+
+    assert finding.severity == "high"
+    assert finding.score < 0.9, "confidence should reflect that the evidence is word order"

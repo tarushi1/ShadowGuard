@@ -104,6 +104,59 @@ def not_all_same_digit(value: str) -> bool:
 
 
 # ---------------------------------------------------------------
+# Credential validators
+# ---------------------------------------------------------------
+# Words that follow "password is" in a sentence ABOUT passwords rather
+# than one containing a password.
+#
+# Without this, "my password is too short", "the password is wrong" and
+# "your password is expired" all report a credential disclosure — and a
+# rule that fires on complaints about passwords is a rule people switch
+# off, taking the real detections with it (the argument in B8).
+_PASSWORD_STOPWORDS = frozenset({
+    "too", "very", "not", "the", "a", "an", "in", "on", "of", "to", "and",
+    "wrong", "incorrect", "invalid", "expired", "correct", "right", "fine",
+    "short", "long", "weak", "strong", "safe", "secure", "insecure",
+    "required", "optional", "case", "sensitive", "blank", "empty", "same",
+    "different", "stored", "hashed", "encrypted", "reset", "changed",
+    "here", "there", "it", "this", "that", "what", "why", "how", "when",
+})
+
+# Obvious stand-ins. Flagging a placeholder trains people to dismiss
+# the warning, which is D17's rule applied to credentials.
+_PASSWORD_PLACEHOLDERS = frozenset({
+    "password", "passwd", "pwd", "yourpassword", "mypassword", "changeme",
+    "xxxxxx", "xxxxxxxx", "placeholder", "example", "redacted", "hidden",
+    "null", "none", "todo", "tbd",
+})
+
+
+def looks_like_a_real_password(value: str) -> bool:
+    """Is this an actual credential, or a sentence about one?
+
+    A password has no format — that is the whole difficulty. `sparrow419`
+    is indistinguishable from a username, a filename or a variable name,
+    and no pattern can separate them. The only evidence is the LABEL
+    beside it, which the rule matches, plus these two negative checks.
+
+    So this rule is weaker than every other one in the file, and its
+    confidence says so.
+    """
+    cleaned = value.strip().strip("\"'`.,;!?")
+
+    if len(cleaned) < 4:
+        return False
+
+    # Masked in the message already: ****, ••••, <password>, [redacted]
+    if set(cleaned) <= set("*•.xX-_") or cleaned.startswith(("<", "[", "{")):
+        return False
+
+    lowered = cleaned.lower()
+
+    return lowered not in _PASSWORD_STOPWORDS and lowered not in _PASSWORD_PLACEHOLDERS
+
+
+# ---------------------------------------------------------------
 # Rules
 # ---------------------------------------------------------------
 
@@ -116,6 +169,20 @@ class Rule:
     severity: str
     confidence: float
     validator: Callable[[str], bool] | None = None
+
+    group: int = 0
+    """Which capture group holds the sensitive span.
+
+    0 (the whole match) for almost every rule. Credential rules need
+    1, because their pattern has to match the LABEL to find the secret
+    — `password is hunter2` — while only `hunter2` is the secret.
+
+    It matters for redaction: with group 0 the output is
+    `[REDACTED: PASSWORD]` and the sentence loses its subject; with
+    group 1 it is `password is [REDACTED: PASSWORD]`, which still reads
+    as a question someone can answer.
+    """
+
     context_words: tuple[str, ...] = ()
     """Words that must appear near a match for it to count.
 
@@ -326,6 +393,68 @@ RULES: tuple[Rule, ...] = (
         ),
     ),
 
+    # ---- Credentials --------------------------------------------
+    # The gap a user found by pasting a real password and watching it
+    # sail through every stage.
+    #
+    # Nothing else in this file could have caught it. A password has NO
+    # FORMAT — `sparrow419` is shaped exactly like a username, a filename
+    # or a variable name — so no pattern matches it, and at ten
+    # lowercase-and-digit characters it is below the entropy stage's
+    # 20-character minimum and would fail its threshold anyway.
+    #
+    # The only evidence is the label beside it. That makes this the
+    # purest application of D29's principle in the file: the rule
+    # matches the LABEL in order to locate the secret, and reports only
+    # the secret via `group=1`.
+    #
+    # `high` rather than `critical`, deliberately. Every critical rule
+    # here is anchored to something unforgeable — a vendor prefix, a PEM
+    # header, a checksum. This one rests on English word order, which is
+    # weaker evidence, and blocking on weak evidence is how a control
+    # loses the authority to block on strong evidence.
+    Rule(
+        name="PASSWORD",
+        pattern=re.compile(
+            # `(?<![A-Za-z0-9])` rather than `\b`, so `MYSQL_PWD=` and
+            # `DB_PASSWORD:` match — an underscore is a word character,
+            # so `\b` never fires after one, and environment variables
+            # are where credentials most often appear in a pasted config.
+            # It still refuses `compass:` and `bypass:`, because the
+            # character before is alphanumeric there.
+            r"(?<![A-Za-z0-9])(?:password|passwd|passphrase|pwd|pass)"
+            # Separators. `=` and `:` need no spaces; the word and dash
+            # forms REQUIRE them, so `password-protected` and
+            # `password-based` are not read as disclosures.
+            r"(?:\s*[=:]\s*|\s+(?:is|was|-|–|—|->)\s+)"
+            r"[\"'`]?([^\s\"'`,;]{4,64})",
+            re.IGNORECASE,
+        ),
+        severity="high",
+        confidence=0.75,
+        group=1,
+        validator=looks_like_a_real_password,
+        description=(
+            "A password disclosed beside its label. Confidence is the lowest "
+            "in the file because the evidence is word order rather than format."
+        ),
+    ),
+    Rule(
+        name="CONNECTION_STRING_PASSWORD",
+        # scheme://user:PASSWORD@host — unambiguous, unlike the rule
+        # above. A colon-separated secret before an @ in a URI is what
+        # a connection string IS, so this one is critical.
+        pattern=re.compile(
+            r"\b[a-z][a-z0-9+.\-]{1,15}://[^\s:@/]{1,64}:([^\s@/]{1,128})@",
+            re.IGNORECASE,
+        ),
+        severity="critical",
+        confidence=0.95,
+        group=1,
+        validator=looks_like_a_real_password,
+        description="Credentials embedded in a database or service URI.",
+    ),
+
     # ---- Contact details ----------------------------------------
     # Low severity on its own: an email address is not a secret. It
     # matters in combination — a name plus an email plus an account
@@ -394,7 +523,13 @@ def scan(text: str) -> list[Finding]:
 
     for rule in RULES:
         for match in rule.pattern.finditer(text):
-            value = match.group(0)
+            # `group` lets a rule match a label to LOCATE its secret
+            # while reporting only the secret itself.
+            value = match.group(rule.group)
+            if value is None:
+                continue
+
+            start, end = match.span(rule.group)
 
             # A validator turns "looks like" into "is". Where one
             # exists, a match that fails it is discarded silently —
@@ -407,14 +542,14 @@ def scan(text: str) -> list[Finding]:
             # different questions, so two separate gates — a valid PAN
             # quoted as an example format is well-formed and still not
             # a disclosure.
-            if not has_supporting_context(text, match.start(), match.end(), rule.name):
+            if not has_supporting_context(text, start, end, rule.name):
                 continue
 
             findings.append(
                 Finding(
                     type=rule.name,
-                    start=match.start(),
-                    end=match.end(),
+                    start=start,
+                    end=end,
                     score=rule.confidence,
                     detector=DETECTOR_NAME,
                     severity=rule.severity,

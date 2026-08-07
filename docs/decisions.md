@@ -1108,6 +1108,71 @@ element.
 
 ---
 
+## D46 — Passwords: the gap a user found by pasting one
+
+**Context.** The author pasted a real password into a chat and asked why it was not caught. It was
+not, and neither was any other credential:
+
+```
+this is my gmail password - ******        allow   score 0   []
+my password is Tr0ub4dor                  allow   score 0   []
+login: admin  pwd: letmein123             allow   score 0   []
+postgres://user:s3cret@localhost/app      allow   score 0   []
+```
+
+**Nothing in the system could have caught them, and the reason is instructive.** A password has
+**no format**. `sparrow419` is shaped exactly like a username, a filename or a variable name — there
+is no pattern to match, no checksum to validate, no vendor prefix to anchor on. And a short
+lowercase-and-digit string sits below the entropy stage's 20-character minimum and would fail its
+threshold anyway.
+
+**The only evidence is the label beside it**, which makes this the purest application of
+[D29](#d29--weak-rules-are-gated-on-nearby-context-words)'s principle in the codebase. Every other
+rule matches the secret and optionally checks its surroundings; this one **matches the surroundings
+in order to find the secret**.
+
+**Chosen:** two rules, deliberately at different severities.
+
+| Rule | Severity | Why |
+|---|---|---|
+| `PASSWORD` | **high**, 0.75 confidence | Rests on English word order — the weakest evidence in the file |
+| `CONNECTION_STRING_PASSWORD` | **critical**, 0.95 | `scheme://user:secret@host` is unambiguous; a colon-separated secret before an `@` in a URI is what a connection string *is* |
+
+`PASSWORD` is **not critical**, and that was a deliberate refusal. Every critical rule here is
+anchored to something unforgeable — a vendor prefix, a PEM header, a Luhn checksum. This one is
+anchored to grammar. *Blocking on weak evidence is how a control loses the authority to block on
+strong evidence.*
+
+**Three design details that carry the precision:**
+
+- **`group=1`.** The pattern matches `password is X` to locate the secret and reports only `X`.
+  Without it, redaction produces `[REDACTED: PASSWORD]` and the sentence loses its subject; with
+  it, `password is [REDACTED: PASSWORD]` still reads as something someone can answer. This required
+  a new `group` field on `Rule` — the first rule in the project whose match is wider than its
+  finding.
+- **`(?<![A-Za-z0-9])` instead of `\b`.** An underscore is a word character, so `\b` never fires
+  after one and `MYSQL_PWD=` would not match — and pasted config is exactly where credentials
+  appear. The lookbehind still refuses `compass:` and `bypass:`.
+- **Separators are asymmetric.** `=` and `:` need no spaces; the word and dash forms *require*
+  them. Otherwise `password-protected` and `password-based` read as disclosures.
+
+Plus two negative lists: stopwords (`too`, `wrong`, `expired`, `short`) so *sentences about*
+passwords are not disclosures, and placeholders (`********`, `changeme`, `<yourpassword>`) because
+flagging a stand-in trains people to dismiss the warning — [D17](#d17--do-not-flag-things-that-are-not-secrets)
+applied to credentials.
+
+**Measured: no regression.** Recall 98.0% → 98.1%, false-positive rate stays **0%**, and regex-only
+recall rose 76% → 78.1%. Ten corpus samples added — five credentials, five hard negatives written
+to defeat this specific rule.
+
+**The wider point for the report.** This gap survived six weeks, a 200-sample corpus, 231 tests and
+an evaluation harness reporting 98% recall — because **every one of those measured the categories
+we had thought of.** A corpus cannot find a missing detector; it can only score the detectors that
+exist against the samples someone chose to write. The one thing that found it was a person using
+the tool for real.
+
+---
+
 ## Still open
 
 | Question | Decide by |

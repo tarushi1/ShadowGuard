@@ -212,3 +212,15 @@
 {"id": "H053", "label": "benign", "category": "hard-negative", "difficulty": "hard", "expected": [], "text": "explain the difference between Django and Flask for a new hire", "note": "G6 framework names"}
 {"id": "H054", "label": "benign", "category": "hard-negative", "difficulty": "hard", "expected": [], "text": "our staging cluster is called Victor and production is called Whiskey", "note": "G6 nato alphabet hostnames that read as people"}
 {"id": "H055", "label": "benign", "category": "hard-negative", "difficulty": "hard", "expected": [], "text": "is Grafana better than Kibana for this kind of dashboard", "note": "G6 product names"}
+
+{"id": "S101", "label": "sensitive", "category": "credential", "difficulty": "hard", "expected": ["PASSWORD"], "text": "this is my gmail password - Hunter2Fake, can you check if it is strong enough", "note": "G7 credential: the gap a real user found by pasting one"}
+{"id": "S102", "label": "sensitive", "category": "credential", "difficulty": "hard", "expected": ["PASSWORD"], "text": "the staging admin password is Tr0ub4dorFake if you need to get in", "note": "G7 credential"}
+{"id": "S103", "label": "sensitive", "category": "credential", "difficulty": "hard", "expected": ["PASSWORD"], "text": "set MYSQL_PWD=abc123xyzFake in the deployment env before restarting", "note": "G7 credential in an env var; no word boundary after the underscore"}
+{"id": "S104", "label": "sensitive", "category": "credential", "difficulty": "hard", "expected": ["CONNECTION_STRING_PASSWORD"], "text": "our dsn is postgres://appuser:s3cretFake@db.internal:5432/prod, is that pooled", "note": "G7 credentials embedded in a URI"}
+{"id": "S105", "label": "sensitive", "category": "credential", "difficulty": "hard", "expected": ["CONNECTION_STRING_PASSWORD"], "text": "redis://default:Qw8ErTyFake@cache-01.internal:6379 keeps dropping connections", "note": "G7 credentials embedded in a URI"}
+
+{"id": "H056", "label": "benign", "category": "hard-negative", "difficulty": "hard", "expected": [], "text": "my password is too short apparently, what length should I use", "note": "G8 a sentence ABOUT a password, not one containing it"}
+{"id": "H057", "label": "benign", "category": "hard-negative", "difficulty": "hard", "expected": [], "text": "the password is wrong every time, is the account locked", "note": "G8 sentence about a password"}
+{"id": "H058", "label": "benign", "category": "hard-negative", "difficulty": "hard", "expected": [], "text": "this is a password-protected document, how do I open it in python", "note": "G8 hyphenated word, not a separator"}
+{"id": "H059", "label": "benign", "category": "hard-negative", "difficulty": "hard", "expected": [], "text": "the docs show password: ******** as the masked example", "note": "G8 already masked in the message"}
+{"id": "H060", "label": "benign", "category": "hard-negative", "difficulty": "hard", "expected": [], "text": "we need to bypass: the cache layer for this one endpoint", "note": "G8 'pass' inside another word"}
