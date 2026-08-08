@@ -105,8 +105,64 @@ globalThis.SG.WarningModal = class WarningModal {
          line-height) from crossing the shadow boundary. Without it
          our dialog silently adopts ChatGPT's typography, which
          changes without notice. */
+      /* ---- Colour tokens -------------------------------------
+         Every colour in this stylesheet is a variable, and the dark
+         theme overrides ONLY the variables. That is not tidiness — it
+         fixes a real bug and prevents its return.
+
+         The first version put the prefers-color-scheme block near the
+         top and the component rules below it. A media query adds NO
+         SPECIFICITY, so with equal specificity the later rule wins:
+         a plain '.detail' background further down silently overrode
+         the dark-mode one, while the text colour still inherited the
+         card's light foreground.
+
+         (This comment previously used backticks. The whole stylesheet
+         is a JS template literal, so they closed the string and every
+         test in the suite failed at once — a reminder that CSS in a
+         template literal is still JavaScript.)
+
+         The result was light text on a light panel — a warning that
+         could not be read, which is a FAILURE TO WARN rather than a
+         cosmetic bug, and exactly the outcome D9 chose Shadow DOM to
+         avoid. It shipped because nobody had opened the modal on a
+         machine in dark mode.
+
+         With tokens, a rule reads var(--sg-panel) wherever it sits in
+         the file, so no amount of reordering can reintroduce this.
+         Contrast ratios are noted because "looks fine on my screen" is
+         how the original passed review. */
       :host {
         all: initial;
+
+        --sg-surface:    #ffffff;   /* card background                  */
+        --sg-text:       #17171a;   /* 17:1 on surface                  */
+        --sg-panel:      #f2f2f5;   /* the detail block                 */
+        --sg-muted:      #5a5a66;   /* 6.5:1 on panel — labels          */
+        --sg-chip:       #e2e2ea;   /* entity pills                     */
+        --sg-code-bg:    #eeeef2;   /* the message preview              */
+        --sg-code-text:  #1f1f26;   /* 14:1 on code-bg                  */
+        --sg-border:     rgba(0, 0, 0, 0.10);
+        --sg-btn-bg:     #e2e2ea;
+        --sg-btn-text:   #17171a;
+      }
+
+      /* The page's theme is not readable from here, so follow the OS
+         preference. Matching ChatGPT's own toggle would mean reading
+         their DOM, which is one more thing to break. */
+      @media (prefers-color-scheme: dark) {
+        :host {
+          --sg-surface:    #1e1e20;
+          --sg-text:       #f2f2f5;  /* 15.5:1 on surface */
+          --sg-panel:      #2b2b30;
+          --sg-muted:      #b4b4c0;  /* 7.4:1 on panel — was opacity:0.65, ~4:1 */
+          --sg-chip:       #3d3d45;
+          --sg-code-bg:    #121214;
+          --sg-code-text:  #e2e2ea;  /* 15:1 on code-bg */
+          --sg-border:     rgba(255, 255, 255, 0.12);
+          --sg-btn-bg:     #3d3d45;
+          --sg-btn-text:   #f2f2f5;
+        }
       }
 
       dialog {
@@ -128,22 +184,11 @@ globalThis.SG.WarningModal = class WarningModal {
                      "Helvetica Neue", Arial, sans-serif;
         font-size: 14px;
         line-height: 1.5;
-        background: #ffffff;
-        color: #1a1a1a;
+        background: var(--sg-surface);
+        color: var(--sg-text);
         border-radius: 14px;
         overflow: hidden;
         box-shadow: 0 24px 64px rgba(0, 0, 0, 0.35);
-      }
-
-      /* The page's theme is not readable from here, so follow the OS
-         preference. Matching ChatGPT's own toggle exactly would mean
-         reading their DOM, which is one more thing to break. */
-      @media (prefers-color-scheme: dark) {
-        .card { background: #1e1e20; color: #ececf1; }
-        .detail { background: #2a2a2e; }
-        .entity { background: #38383d; color: #ececf1; }
-        .btn-secondary { background: #38383d; color: #ececf1; }
-        .preview { background: #141416; color: #c9c9d1; }
       }
 
       .banner {
@@ -177,7 +222,8 @@ globalThis.SG.WarningModal = class WarningModal {
       .message { margin: 0 0 14px; }
 
       .detail {
-        background: #f4f4f6;
+        background: var(--sg-panel);
+        border: 1px solid var(--sg-border);
         border-radius: 10px;
         padding: 12px 14px;
         margin-bottom: 14px;
@@ -190,12 +236,17 @@ globalThis.SG.WarningModal = class WarningModal {
         margin-bottom: 8px;
       }
       .row:last-child { margin-bottom: 0; }
-      .label { opacity: 0.65; }
+      /* An explicit colour, not 'opacity: 0.65'. Opacity multiplies
+         against whatever is behind it, so the same rule produced ~4:1
+         contrast in dark mode and ~7:1 in light — a value that cannot
+         be checked because it depends on the backdrop. */
+      .label { color: var(--sg-muted); }
       .value { font-weight: 600; font-variant-numeric: tabular-nums; }
 
       .entities { display: flex; flex-wrap: wrap; gap: 6px; }
       .entity {
-        background: #e4e4ea;
+        background: var(--sg-chip);
+        color: var(--sg-text);
         border-radius: 999px;
         padding: 3px 10px;
         font-size: 12px;
@@ -203,7 +254,9 @@ globalThis.SG.WarningModal = class WarningModal {
       }
 
       .preview {
-        background: #f0f0f3;
+        background: var(--sg-code-bg);
+        color: var(--sg-code-text);
+        border: 1px solid var(--sg-border);
         border-radius: 8px;
         padding: 10px 12px;
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -232,7 +285,7 @@ globalThis.SG.WarningModal = class WarningModal {
       }
       button:focus-visible { outline: 2px solid #4c8bf5; outline-offset: 2px; }
 
-      .btn-secondary { background: #e4e4ea; color: #1a1a1a; }
+      .btn-secondary { background: var(--sg-btn-bg); color: var(--sg-btn-text); }
       .btn-danger    { background: #c62828; color: #fff; }
       .btn-danger[hidden] { display: none; }
 

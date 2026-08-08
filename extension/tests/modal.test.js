@@ -181,3 +181,100 @@ test("the redact variant defaults to its action button", async () => {
   modal.dismiss();
   await decision;
 });
+
+// ---------------------------------------------------------------
+// Theming — a warning nobody can read is a failure to warn
+// ---------------------------------------------------------------
+
+const fsMod = require("node:fs");
+const pathMod = require("node:path");
+
+function modalStyles() {
+  return fsMod.readFileSync(
+    pathMod.join(__dirname, "..", "src", "ui", "modal.js"), "utf8"
+  );
+}
+
+test("the dark theme overrides only custom properties", () => {
+  // The regression this test exists for.
+  //
+  // The first version set `.detail { background: #2a2a2e }` INSIDE
+  // `@media (prefers-color-scheme: dark)`, near the top of the sheet,
+  // with `.detail { background: #f4f4f6 }` further down. A media query
+  // adds no specificity, so the later rule won and dark mode rendered
+  // light text on a light panel.
+  //
+  // The check is that the dark block contains NO class selectors at
+  // all — only `:host`, only tokens. An earlier version of this test
+  // parsed declarations line by line and was verified by injecting the
+  // bug: it passed, because the original defect was written inline and
+  // the regex only saw properties at the start of a line. A regression
+  // test that cannot fail on the exact bug it names is decoration.
+  const styles = modalStyles();
+  const queryAt = styles.indexOf("prefers-color-scheme: dark");
+  const dark = styles.slice(styles.indexOf("\n", queryAt));
+  const block = dark.slice(0, dark.indexOf("\n      }\n") + 10);
+
+  const selectors = [...block.matchAll(/(^|\s)(\.[a-zA-Z][\w-]*)\s*(?=[,{])/g)]
+    .map((match) => match[2]);
+
+  assert.deepEqual(
+    selectors, [],
+    `dark mode styles ${selectors.join(", ")} directly; it must only override tokens on :host`
+  );
+});
+
+test("no component rule hardcodes a surface or text colour", () => {
+  // Every themeable colour has to come from a token, or one branch of
+  // the theme silently keeps a value meant for the other.
+  const styles = modalStyles();
+  const cssStart = styles.indexOf("style.textContent = `");
+  const css = styles.slice(cssStart, styles.indexOf("`;", cssStart));
+
+  for (const selector of [".card", ".detail", ".preview", ".entity", ".btn-secondary"]) {
+    const start = css.indexOf(`\n      ${selector} `) + 1;
+    assert.ok(start > 0, `${selector} not found`);
+
+    const rule = css.slice(start, css.indexOf("}", start));
+    const literals = rule.match(/#[0-9a-fA-F]{3,8}\b/g) ?? [];
+
+    assert.deepEqual(
+      literals, [],
+      `${selector} hardcodes ${literals.join(", ")} — use a token so both themes stay readable`
+    );
+  }
+});
+
+test("labels use an explicit colour rather than opacity", () => {
+  // `opacity` multiplies against whatever is behind it, so one rule
+  // produced ~4:1 contrast in dark mode and ~7:1 in light — a value
+  // that cannot be verified because it depends on the backdrop.
+  const styles = modalStyles();
+  const label = styles.slice(styles.indexOf("\n      .label"));
+
+  assert.ok(!label.slice(0, 120).includes("opacity"), ".label is back on opacity");
+});
+
+test("both themes define every token the rules read", () => {
+  // A token used but never defined falls back to nothing, and the
+  // property is simply dropped — an invisible panel rather than an
+  // error.
+  const styles = modalStyles();
+  const cssStart = styles.indexOf("style.textContent = `");
+  const css = styles.slice(cssStart, styles.indexOf("`;", cssStart));
+
+  const used = new Set([...css.matchAll(/var\((--sg-[a-z-]+)\)/g)].map((m) => m[1]));
+  const darkStart = css.indexOf("prefers-color-scheme: dark");
+
+  const definedInLight = new Set(
+    [...css.slice(0, darkStart).matchAll(/(--sg-[a-z-]+)\s*:/g)].map((m) => m[1])
+  );
+  const definedInDark = new Set(
+    [...css.slice(darkStart).matchAll(/(--sg-[a-z-]+)\s*:/g)].map((m) => m[1])
+  );
+
+  for (const token of used) {
+    assert.ok(definedInLight.has(token), `${token} has no light-theme value`);
+    assert.ok(definedInDark.has(token), `${token} has no dark-theme value`);
+  }
+});

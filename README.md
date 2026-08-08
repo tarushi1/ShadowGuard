@@ -109,7 +109,7 @@ like code, and only executable checks notice — which is why a few agreements a
 | **Current stage** | Stages 0–3 live: interception, regex, entropy, semantic, OCR, risk engine, redaction, persistence — for text **and** images, on ChatGPT and (unverified) Gemini. |
 | **Completed** | **Weeks 1–6 complete.** Gemini adapter written but **not verified against the live site**. |
 | **Next task** | **Week 7 — behavioural baseline (Stage 4), then the dashboard** |
-| **Tests** | **239 Python** (`pytest -q`) · **60 JavaScript** (`npm test`) · extension **v0.11.0** |
+| **Tests** | **239 Python** (`pytest -q`) · **64 JavaScript** (`npm test`) · extension **v0.11.1** |
 | **Measured** | 210-sample corpus — text: recall **98.1%**, FPR **0%**, F1 **99%** · images: OCR retention **93.9%**, OCR-induced FPR **2.0%** |
 | **Deadline** | ~2026-09-20 (8 weeks from 2026-07-26) |
 | **Weeks elapsed** | **1.7 of 8**, with 6 weeks of plan delivered — well ahead |
@@ -120,7 +120,7 @@ Loading `extension/` unpacked into Chrome and opening `chatgpt.com` produces, in
 
 ```
  [ShadowGuard] ACTIVE            ← green badge
-[ShadowGuard] version    : 0.11.0
+[ShadowGuard] version    : 0.11.1
 [ShadowGuard] host       : chatgpt.com
 [ShadowGuard] frame      : top-level
 [ShadowGuard] adapter    : ChatGPT (chatgpt)
