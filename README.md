@@ -14,7 +14,7 @@ It computes a risk score and decides whether to **allow**, **warn**, **redact**,
 
 > Read `README.md` and `docs/decisions.md` in this repo, in that order, before doing anything else.
 > `README.md` is the session-recovery document: it has current state, the exact next task, and the
-> mentoring contract I work under. `docs/decisions.md` is the decision log (D1–D45) — every choice
+> mentoring contract I work under. `docs/decisions.md` is the decision log (D1–D46) — every choice
 > and its reasoning, so you don't re-litigate settled decisions or contradict them. Then tell me
 > what you understand the next task to be, and wait for me to confirm before writing code.
 
@@ -23,7 +23,7 @@ It computes a risk score and decides whether to **allow**, **warn**, **redact**,
 | File | What it gives a fresh session |
 |---|---|
 | **`README.md`** | State, next task, roadmap, how to run everything, measured results, the mentoring contract |
-| **`docs/decisions.md`** | **D1–D45** — why every choice was made, and what was rejected. This is what stops a new session undoing settled work |
+| **`docs/decisions.md`** | **D1–D46** — why every choice was made, and what was rejected. This is what stops a new session undoing settled work |
 
 If it needs more, point it at the [knowledge base index](docs/README.md) — but don't paste those
 up front. A session that reads everything before starting spends its context on history instead of
@@ -68,7 +68,7 @@ than silently replacing broken code.
 
 **It is a security project, so say the uncomfortable things.** Point out risks, false positives,
 false negatives, privacy concerns, ethical problems and limitations without being asked. Bypasses
-are tracked in [docs/security.md](docs/security.md) as **B1–B11**, several of which this design
+are tracked in [docs/security.md](docs/security.md) as **B1–B12**, several of which this design
 created on purpose. Volunteering a weakness is far stronger than being asked about it.
 
 **Keep `README.md` and `docs/` current at all times**, not at the end. Documentation drifts exactly
@@ -103,9 +103,9 @@ like code, and only executable checks notice — which is why a few agreements a
 
 | | |
 |---|---|
-| **Last updated** | 2026-08-07 |
+| **Last updated** | 2026-08-08 |
 | **Project root** | `/Users/arushitiwari/Desktop/ShadowGuard` |
-| **Git branch** | `main` (63 commits, working tree clean) |
+| **Git branch** | `main` (66 commits, working tree clean) |
 | **Current stage** | Stages 0–3 live: interception, regex, entropy, semantic, OCR, risk engine, redaction, persistence — for text **and** images, on ChatGPT and (unverified) Gemini. |
 | **Completed** | **Weeks 1–6 complete.** Gemini adapter written but **not verified against the live site**. |
 | **Next task** | **Week 7 — behavioural baseline (Stage 4), then the dashboard** |
