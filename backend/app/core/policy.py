@@ -53,6 +53,14 @@ CLASS_OF: dict[str, str] = {
     "CREDIT_CARD": "financial",
     "IBAN": "financial",
     # Grants access to a system rather than describing a person.
+    #
+    # Passwords sit here rather than in a class of their own: what
+    # matters for fusion is that they GRANT ACCESS, which is the same
+    # thing an API key does. The difference between them is how
+    # confidently we detected one, and that is already carried by
+    # `score` — see D46 on why PASSWORD is `high` and not `critical`.
+    "PASSWORD": "secret",
+    "CONNECTION_STRING_PASSWORD": "secret",
     "PRIVATE_KEY": "secret",
     "OPENAI_API_KEY": "secret",
     "ANTHROPIC_API_KEY": "secret",
