@@ -187,7 +187,7 @@ candidate who pivots smoothly looks more competent than one whose demo never bre
 
 If time runs short, these carry the project:
 
-1. **"Regex alone gets 78% recall. Entropy adds 11 points, semantics adds 9 more, and none of them
+1. **"Regex alone gets 83% recall. Entropy adds 7 points, semantics adds 9 more, and none of them
    costs a single false positive — measured on the same 210 samples in one run."**
 
 2. **"Eight of eleven missed messages had *completely correct* detection. They were allowed through

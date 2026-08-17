@@ -68,7 +68,7 @@ than silently replacing broken code.
 
 **It is a security project, so say the uncomfortable things.** Point out risks, false positives,
 false negatives, privacy concerns, ethical problems and limitations without being asked. Bypasses
-are tracked in [docs/security.md](docs/security.md) as **B1–B12**, several of which this design
+are tracked in [docs/security.md](docs/security.md) as **B1–B13**, several of which this design
 created on purpose. Volunteering a weakness is far stronger than being asked about it.
 
 **Keep `README.md` and `docs/` current at all times**, not at the end. Documentation drifts exactly
@@ -113,8 +113,8 @@ like code, and only executable checks notice — which is why a few agreements a
 | **Current stage** | Stages 0–3 live: interception, regex, entropy, semantic, OCR, risk engine, redaction, persistence — for text **and** images, on ChatGPT and (unverified) Gemini. |
 | **Completed** | **Weeks 1–6 complete.** Gemini adapter written but **not verified against the live site**. |
 | **Next task** | **Review-I prep**: verify citations, build the deck, rehearse the demo |
-| **Tests** | **239 Python** (`pytest -q`) · **64 JavaScript** (`npm test`) · extension **v0.11.1** |
-| **Measured** | 210-sample corpus — text: recall **98.1%**, FPR **0%**, F1 **99%** · images: OCR retention **93.9%**, OCR-induced FPR **2.0%** |
+| **Tests** | **265 Python** (`pytest -q`) · **64 JavaScript** (`npm test`) · extension **v0.11.1** |
+| **Measured** | 210-sample corpus — text: recall **98.1%**, FPR **0%**, F1 **99%** (regex alone **82.9%**) · images: OCR retention **93.9%**, OCR-induced FPR **2.0%** |
 | **Deadline** | ~2026-09-20 (8 weeks from 2026-07-26) |
 | **Weeks elapsed** | **1.7 of 8**, with 6 weeks of plan delivered — well ahead |
 

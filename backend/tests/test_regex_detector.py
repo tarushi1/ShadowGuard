@@ -346,11 +346,27 @@ def test_luhn_rejects_invalid_numbers(number):
 # Robustness
 # ---------------------------------------------------------------
 
-def test_every_rule_has_a_distinct_name():
-    """Duplicate names would silently merge two rules in the UI and in
-    any per-type metric the evaluation harness reports."""
-    names = [rule.name for rule in RULES]
-    assert len(names) == len(set(names))
+def test_rules_sharing_a_name_agree_on_severity():
+    """Two rules MAY report the same entity type deliberately.
+
+    `PASSWORD` is matched by two rules because the separator changes
+    how much evidence the label carries: an explicit `password: X`
+    tolerates a weaker value test than a bare `password X`. Merging
+    them into the same reported type is the intent, not an accident.
+
+    What must not differ is what the merge MEANS. Two rules with one
+    name and two severities would make the verdict depend on which
+    happened to match first, which is the bug the original
+    distinct-names check was really guarding against.
+    """
+    from collections import defaultdict
+
+    by_name = defaultdict(set)
+    for rule in RULES:
+        by_name[rule.name].add(rule.severity)
+
+    for name, severities in by_name.items():
+        assert len(severities) == 1, f"{name} is reported at {severities}"
 
 
 def test_large_input_completes_quickly():
@@ -468,3 +484,72 @@ def test_a_password_is_high_not_critical():
 
     assert finding.severity == "high"
     assert finding.score < 0.9, "confidence should reflect that the evidence is word order"
+
+
+# ---------------------------------------------------------------
+# Credential phrasing — generality, not just the examples I wrote
+# ---------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "my password is Hunter2Fake",
+        "password Hunter2Fake",                     # no separator at all
+        "here is the password Hunter2Fake",
+        "user=admin password=Hunter2Fake",
+        "DB_PASSWORD: sup3rSecretFake",
+        "set MYSQL_PWD=abc123xyz in the env",
+        "the auth token is abc123xyz",
+        "auth token: Kj8sLm2p",
+        "my token is 7fXq2Lm9",
+        "the api key is Zz44kdMe",
+        "secret: Tr0ub4dorFake",
+        "creds are admin / Hunter2Fake",
+        "credentials admin:Hunter2Fake",
+        "passcode 44Kd9Lm2",
+    ],
+)
+def test_credentials_are_caught_across_natural_phrasings(text):
+    """The generality test this rule did not have.
+
+    The first version recognised five label words and REQUIRED an
+    explicit separator. Against fifteen phrasings a person might
+    actually type, it caught TWO — `auth token is ...`, `secret: ...`,
+    `api key is ...` and even `password Hunter2Fake` all passed
+    straight through.
+
+    That was found by a user writing normally, not by any test here,
+    which is the same lesson as D46: a corpus scores the detectors you
+    built against the samples you thought to write. These cases exist
+    so the rule cannot silently narrow again.
+    """
+    assert "PASSWORD" in types_in(text), f"missed a credential in: {text}"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "my password manager keeps logging me out",
+        "explain what a JWT token is and how it works",
+        "the token economy is an interesting concept",
+        "pass the test data through the parser",
+        "what is the key insight from this paper",
+        "the secret to good code is small functions",
+        "store the api key safely in a react native app",
+        "how do I rotate credentials without downtime",
+        "the access token expires after one hour",
+        "what does the auth token contain",
+        "the s3 object key is uploads/2026/07/29/a7b3c9d1e5f2/report.pdf",
+        "the meeting bridge is 0000 0000 0000 0000 and the pin is four digits",
+    ],
+)
+def test_broadening_the_labels_did_not_cost_precision(text):
+    """The other half, and the half that constrains the first.
+
+    Broadening the label list to catch real phrasings immediately cost
+    two corpus false positives — `key` matched an S3 path and `pin`
+    matched the word "four". Both words were removed from the weak set
+    rather than patched around, because no stopword list can enumerate
+    every English word that might follow them.
+    """
+    assert "PASSWORD" not in types_in(text), f"false positive on: {text}"

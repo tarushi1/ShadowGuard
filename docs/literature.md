@@ -216,9 +216,9 @@ the Design/Methodology and Implementation marks.*
 
 ```
                      regex only    + entropy    + semantic
-  recall                  78.1%        89.5%        98.1%
+  recall                  82.9%        89.5%        98.1%
   false-positive rate      0.0%         0.0%         0.0%
-  F1                      87.7%        94.5%        99.0%
+  F1                      90.6%        94.5%        99.0%
   latency p95           0.029 ms     0.031 ms     3.840 ms
 
   images:  OCR round-trip retention 93.9%   ·   OCR-induced FPR 2.0%

@@ -131,6 +131,64 @@ _PASSWORD_PLACEHOLDERS = frozenset({
 })
 
 
+# Credential labels, longest first so the alternation prefers
+# "api key" over "key" and "auth token" over "token".
+#
+# STRONG labels are words that mean a credential and little else, so a
+# bare space is enough of a separator: "password Hunter2Fake".
+_LABELS_STRONG = (
+    "passphrase", "passcode", "password", "passwd",
+    "credentials", "creds",
+    "client secret", "secret key", "api secret",
+    "auth token", "access token", "bearer token", "api token", "auth key",
+    "api key", "apikey", "api_key",
+)
+
+# WEAK labels are ordinary English words that also name credentials.
+# They require an EXPLICIT separator — "token: abc" counts, "token abc"
+# does not — because "the token economy" and "pass the test" are
+# ordinary prose.
+#
+# `key` and `pin` were here and are deliberately NOT. Broadening the
+# rule with them cost two corpus false positives immediately:
+#
+#   "the s3 object key is uploads/2026/07/29/..."  -> flagged the PATH
+#   "...and the pin is four digits"                -> flagged "four"
+#
+# Both words are too common in technical prose to carry evidence on
+# their own, and no stopword list can enumerate every English word that
+# might follow them. Nothing real is lost: `api key`, `auth key` and
+# `secret key` are all STRONG labels already, so the credential senses
+# of "key" are still covered while the ordinary sense is not.
+#
+# This is the precision/recall trade of D29 in miniature — the two
+# labels that would have caught the most also cost the most.
+_LABELS_WEAK = ("token", "secret", "pwd", "pass")
+
+
+def _alternation(labels: tuple[str, ...]) -> str:
+    return "|".join(re.escape(word).replace(r"\ ", r"\s+") for word in labels)
+
+
+def looks_credential_shaped(value: str) -> bool:
+    """Does this token look generated rather than typed?
+
+    The guard that makes a bare-space separator safe. Without it,
+    "password manager keeps logging me out" reports `manager` as the
+    credential.
+
+    A real credential almost always contains a digit or mixes case;
+    an ordinary English word following a label does neither. This is
+    the same test the OCR repair uses to decide whether a fragment is
+    part of a split secret or the next word of a sentence.
+    """
+    cleaned = value.strip("\"'`.,;!?")
+
+    return any(c.isdigit() for c in cleaned) or (
+        any(c.isupper() for c in cleaned) and any(c.islower() for c in cleaned)
+    )
+
+
 def looks_like_a_real_password(value: str) -> bool:
     """Is this an actual credential, or a sentence about one?
 
@@ -413,6 +471,15 @@ RULES: tuple[Rule, ...] = (
     # header, a checksum. This one rests on English word order, which is
     # weaker evidence, and blocking on weak evidence is how a control
     # loses the authority to block on strong evidence.
+    # Two rules, one entity type, because the SEPARATOR changes how much
+    # evidence the label carries.
+    #
+    # The first version required an explicit separator and recognised
+    # only five label words. Tested against fifteen natural phrasings it
+    # caught TWO -- `auth token is ...`, `secret: ...`, `api key is ...`
+    # and `password Hunter2Fake` all sailed through. That is
+    # brittleness, not detection, and it was found by a user writing
+    # normally rather than by any test in this repository.
     Rule(
         name="PASSWORD",
         pattern=re.compile(
@@ -422,11 +489,12 @@ RULES: tuple[Rule, ...] = (
             # are where credentials most often appear in a pasted config.
             # It still refuses `compass:` and `bypass:`, because the
             # character before is alphanumeric there.
-            r"(?<![A-Za-z0-9])(?:password|passwd|passphrase|pwd|pass)"
+            r"(?<![A-Za-z0-9])(?:" + _alternation(_LABELS_STRONG + _LABELS_WEAK) + r")"
             # Separators. `=` and `:` need no spaces; the word and dash
             # forms REQUIRE them, so `password-protected` and
             # `password-based` are not read as disclosures.
-            r"(?:\s*[=:]\s*|\s+(?:is|was|-|–|—|->)\s+)"
+            r"(?:\s*[=:]\s*|\s+(?:is|was|are|-|–|—|->)\s+)"
+            r"(?:the\s+)?"
             r"[\"'`]?([^\s\"'`,;]{4,64})",
             re.IGNORECASE,
         ),
@@ -435,9 +503,30 @@ RULES: tuple[Rule, ...] = (
         group=1,
         validator=looks_like_a_real_password,
         description=(
-            "A password disclosed beside its label. Confidence is the lowest "
-            "in the file because the evidence is word order rather than format."
+            "A credential disclosed beside its label, with an explicit "
+            "separator. Confidence is the lowest in the file because the "
+            "evidence is word order rather than format."
         ),
+    ),
+    Rule(
+        name="PASSWORD",
+        # No separator at all: "password Hunter2Fake", "here is the
+        # password Hunter2Fake".
+        #
+        # STRONG labels only, and the value must LOOK generated. Both
+        # restrictions are load-bearing: with weak labels this matches
+        # "pass the test", and without the shape check it reports
+        # `manager` from "password manager keeps logging me out".
+        pattern=re.compile(
+            r"(?<![A-Za-z0-9])(?:" + _alternation(_LABELS_STRONG) + r")"
+            r"\s+(?:for\s+|to\s+)?[\"'`]?([^\s\"'`,;]{5,64})",
+            re.IGNORECASE,
+        ),
+        severity="high",
+        confidence=0.7,
+        group=1,
+        validator=lambda v: looks_like_a_real_password(v) and looks_credential_shaped(v),
+        description="A credential adjacent to its label, with no separator.",
     ),
     Rule(
         name="CONNECTION_STRING_PASSWORD",
