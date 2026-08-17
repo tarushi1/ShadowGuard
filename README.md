@@ -96,6 +96,9 @@ like code, and only executable checks notice — which is why a few agreements a
 | [evaluation/README.md](evaluation/README.md) | The corpus, its methodology, and the threats to validity — **report material** |
 | [extension/tests/README.md](extension/tests/README.md) | The JavaScript test harness — what it covers, and what it deliberately cannot |
 | [evaluation/corpus-spec-v2.md](evaluation/corpus-spec-v2.md) | The corpus extension, **pre-registered** with six predictions, then graded — three were wrong |
+| [docs/literature.md](docs/literature.md) | **Literature review, gap identification and objectives** — report material, rubric items 1–3 |
+| [docs/review-1-slides.md](docs/review-1-slides.md) | The 20-slide deck, mapped slide-by-slide to the marking scheme |
+| [docs/demo.md](docs/demo.md) | The rehearsed 7-minute live demo, with a fallback for every failure mode |
 
 ---
 
@@ -104,11 +107,12 @@ like code, and only executable checks notice — which is why a few agreements a
 | | |
 |---|---|
 | **Last updated** | 2026-08-08 |
+| **⏰ Review-I** | **Wed 19 Aug 2026, 11:20 SJT** — see [demo.md](docs/demo.md) and [review-1-slides.md](docs/review-1-slides.md) |
 | **Project root** | `/Users/arushitiwari/Desktop/ShadowGuard` |
 | **Git branch** | `main` (66 commits, working tree clean) |
 | **Current stage** | Stages 0–3 live: interception, regex, entropy, semantic, OCR, risk engine, redaction, persistence — for text **and** images, on ChatGPT and (unverified) Gemini. |
 | **Completed** | **Weeks 1–6 complete.** Gemini adapter written but **not verified against the live site**. |
-| **Next task** | **Week 7 — behavioural baseline (Stage 4), then the dashboard** |
+| **Next task** | **Review-I prep**: verify citations, build the deck, rehearse the demo |
 | **Tests** | **239 Python** (`pytest -q`) · **64 JavaScript** (`npm test`) · extension **v0.11.1** |
 | **Measured** | 210-sample corpus — text: recall **98.1%**, FPR **0%**, F1 **99%** · images: OCR retention **93.9%**, OCR-induced FPR **2.0%** |
 | **Deadline** | ~2026-09-20 (8 weeks from 2026-07-26) |
