@@ -99,6 +99,7 @@ like code, and only executable checks notice — which is why a few agreements a
 | [docs/literature.md](docs/literature.md) | **Literature review, gap identification and objectives** — report material, rubric items 1–3 |
 | [docs/review-1-slides.md](docs/review-1-slides.md) | The 20-slide deck, mapped slide-by-slide to the marking scheme |
 | [docs/demo.md](docs/demo.md) | The rehearsed 7-minute live demo, with a fallback for every failure mode |
+| [docs/review-1-report.md](docs/review-1-report.md) | **The Review-I report** in the required VIT format — abstract to references |
 
 ---
 
