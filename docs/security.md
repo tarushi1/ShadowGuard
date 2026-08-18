@@ -39,7 +39,30 @@ Tracked deliberately. Each is either fixed, scheduled, or accepted with reasonin
 | B14 | **Reloading the extension mid-session.** A tab open from before the reload keeps a dead `chrome.runtime` handle. It can still cancel sends but can never get a verdict. | **Fixed** — the rejection is caught, interception is switched off so the page stays usable, and the modal says to reload. Previously this failed CLOSED and silently |
 | B13 | **An unrecognised credential label.** The rule knows ~20 label words. `my sekrit is X`, `the passphrase for the vault, X`, or a label in another language is invisible. | **Inherent to a lexical rule.** Broadening the list costs precision — `key` and `pin` were removed after each caused a corpus false positive |
 | B12 | **A credential with no label.** `PASSWORD` fires on the words around the secret, so `Hunter2Fake` sent alone, or after a label this rule does not know, is invisible. | **Inherent.** A password has no format; without a label there is nothing to detect. Same trade as B8 |
-| B11 | **Screenshot a secret.** Detection through an image is measurably worse than on typed text — 93.9% retention on rendered images, and an upper bound at that. `GOOGLE_API_KEY` and `JWT` still survive OCR **0%** of the time, so screenshotting either is a reliable bypass today. | **Partially closed** by the repair step (D42), which took retention from 86.7%. The residue is measured and named rather than estimated |
+| B11 | **Screenshot a secret.** Detection through an image is measurably worse than on typed text — 93.9% retention on rendered images, and an upper bound at that. `GOOGLE_API_KEY` and `JWT` still survive OCR **0%** of the time, so screenshotting either is a reliable bypass today. | **Partially closed** by the repair step (D42), which took retention from 86.7%. The residue is measured and named rather than estimated. **Confirmed on a real screenshot 19 Aug 2026** — see below |
+
+### On B11 — where the fragility actually lives
+
+A real screenshot of `AKIAIOSFODNN7EXAMPLE` was allowed through, and the cause is sharper than
+"OCR is unreliable". Rendering the same token in three fonts and reading it back:
+
+```
+Menlo      ->  AKIATOSFODNN7EXAMPLE     block    I->T, after the prefix
+Helvetica  ->  AKIAIOSFODNN7EXAMPLE     block    exact
+Times      ->  AKTAIOSFODNN7EXAMPLE     allow    I->T, inside the prefix
+```
+
+**Every font produced the same `I` -> `T` confusion.** What differs is *where* it lands. The rule
+is `AKIA` plus sixteen characters: a substitution in the sixteen-character body is harmless,
+because the wrong character is still a valid body character. A substitution inside the
+four-character prefix destroys the match entirely.
+
+**Four characters out of twenty carry all of the fragility.** That is the real shape of B11, and it
+suggests the fix: match vendor prefixes with a small edit-distance tolerance on OCR-sourced text
+only, where the blast radius is already contained (D42). Not attempted before Review-I.
+
+It also confirms the caveat attached to every OCR figure in this project — measurements used
+rendered monospace text, and a real screenshot in a proportional font does worse.
 
 ### On B8 — a bypass that was bought deliberately
 
