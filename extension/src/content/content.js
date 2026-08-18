@@ -166,7 +166,7 @@
     // blocked. The service worker runs with the extension's own origin
     // and is granted the hosts in host_permissions. This round trip
     // through the worker is Chrome's design, not a workaround.
-    const result = await chrome.runtime.sendMessage({
+    const result = await ask({
       type: SG.MSG.ANALYZE_REQUEST,
       payload: {
         text,
@@ -186,10 +186,17 @@
 
       const decision = await modal.show({
         variant: "offline",
-        message:
-          "ShadowGuard could not reach its analysis service, so this message " +
-          "has NOT been checked for sensitive content. Send it only if you " +
-          "are confident it is safe.",
+        // Two different failures need two different sentences. "The
+        // service is down" and "this tab has lost the extension" call
+        // for different actions from the user, and a single generic
+        // message would leave them retrying something that cannot work.
+        message: result?.disconnected
+          ? "ShadowGuard was reloaded or updated while this page was open, so " +
+            "this tab is no longer protected and the message has NOT been " +
+            "checked. Reload the page to restore protection."
+          : "ShadowGuard could not reach its analysis service, so this message " +
+            "has NOT been checked for sensitive content. Send it only if you " +
+            "are confident it is safe.",
         preview: previewOf(text),
         allowProceed: SG.CONFIG.FAIL_MODE === "open",
       });
@@ -304,7 +311,7 @@
     }
 
     const started = performance.now();
-    const result = await chrome.runtime.sendMessage({
+    const result = await ask({
       type: SG.MSG.ANALYZE_IMAGE,
       payload: {
         image_b64: await toBase64(file),
@@ -321,9 +328,11 @@
 
       const decision = await modal.show({
         variant: "offline",
-        message:
-          "ShadowGuard could not check this image for sensitive content. " +
-          "Attach it only if you are confident it is safe.",
+        message: result?.disconnected
+          ? "ShadowGuard was reloaded while this page was open, so this image " +
+            "has NOT been checked. Reload the page to restore protection."
+          : "ShadowGuard could not check this image for sensitive content. " +
+            "Attach it only if you are confident it is safe.",
         allowProceed: SG.CONFIG.FAIL_MODE === "open",
       });
 
@@ -376,6 +385,64 @@
       reader.onload = () => resolve(String(reader.result).split(",", 2)[1] ?? "");
       reader.readAsDataURL(file);
     });
+  }
+
+  /**
+   * Ask the service worker something, without ever throwing.
+   *
+   * `chrome.runtime.sendMessage` REJECTS — it does not resolve with an
+   * error — when the messaging channel is gone. The two ways that
+   * happens are both routine:
+   *
+   *   - the extension was reloaded, updated or disabled while this
+   *     page was already open ("Extension context invalidated")
+   *   - the service worker failed to start at all
+   *
+   * The first is what happens every single time you press ↻ on
+   * chrome://extensions without also reloading the tab, which is the
+   * most common thing a developer does.
+   *
+   * WHY THIS WRAPPER EXISTS AT ALL. The caller already handles a
+   * FAILED analysis by failing open with a visible notice (D12). But a
+   * REJECTED promise skipped that path entirely: the exception escaped
+   * `handleIntercept`, the message stayed cancelled, and nothing was
+   * ever replayed. The composer simply stopped working, with only a
+   * console error to say why.
+   *
+   * That is failing CLOSED, silently — the precise opposite of the
+   * stated policy, arrived at by forgetting that a rejection is not a
+   * return value. Converting the throw into `{ok: false}` puts this
+   * failure back onto the path that was designed for it.
+   */
+  async function ask(message) {
+    try {
+      return await chrome.runtime.sendMessage(message);
+    } catch (error) {
+      const invalidated = /context invalidated|receiving end does not exist/i.test(
+        error?.message ?? ""
+      );
+
+      if (invalidated) {
+        // The extension is gone from under this page. Nothing we send
+        // will ever be answered, so stop cancelling sends — otherwise
+        // every subsequent message is held for an analysis that can
+        // never arrive, and the user cannot use ChatGPT at all until
+        // they reload.
+        interceptor.enabled = false;
+        imageInterceptor.enabled = false;
+
+        console.warn(
+          `%c ${TAG} DISCONNECTED `,
+          "background:#a11; color:#fff; padding:2px 6px; border-radius:3px;",
+          "\n  The extension was reloaded or updated while this page was open, " +
+          "so this tab can no longer reach it." +
+          "\n  Interception is now OFF so the page stays usable." +
+          "\n  RELOAD THE PAGE to restore protection."
+        );
+      }
+
+      return { ok: false, error: error?.message ?? "no response", disconnected: invalidated };
+    }
   }
 
   /** Trim the user's text to something that fits the modal. */

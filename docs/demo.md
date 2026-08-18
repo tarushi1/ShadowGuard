@@ -15,13 +15,13 @@ Run this. If anything fails, you have time to fix it; in the exam room you do no
 ```bash
 cd ~/Desktop/ShadowGuard
 .venv/bin/pytest -q                      # expect: 239 passed
-npm test                                 # expect: # pass 64
+npm test                                 # expect: # pass 67
 .venv/bin/python -m evaluation.run_eval  # expect: recall 98.1%, FPR 0.0%
 ```
 
 **Then:**
 
-1. `chrome://extensions` → **↻** on ShadowGuard → confirm **v0.11.1**
+1. `chrome://extensions` → **↻** on ShadowGuard → confirm **v0.11.2**
 2. Open `chatgpt.com`, press **Cmd+R**, open the console (**⌥⌘I**)
 3. Confirm the green `ACTIVE` badge and `composer matched at tier 1/6`
 4. Start the backend and **leave the terminal visible** — the log lines are evidence:
@@ -173,6 +173,7 @@ my password is Tr0ub4dorFake
 
 | Symptom | Say this, then move on |
 |---|---|
+| **"Extension context invalidated"** in the console | **Reload the ChatGPT tab (Cmd+R).** You reloaded the extension without reloading the page. The tool now detects this, turns interception off and says so — but reload anyway to restore protection. |
 | Grey "offline" modal | "The backend is down — and note it **fails open with a visible notice**, which is a documented decision, not an accident." Restart uvicorn. |
 | No modal at all | Check the console context is **ShadowGuard AI**, not `top`. If still nothing, switch to the evaluation output. |
 | ChatGPT layout changed | "The adapter matched at tier 4 rather than 1 — the tiering exists exactly for this, and the console reports it." Then switch to numbers. |
