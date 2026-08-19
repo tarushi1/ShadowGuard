@@ -54,4 +54,5 @@ evaluation/data/images/
 .vscode/*
 !.vscode/settings.json
 
+# ---- Local editor and tool state ----
 # Tool-permission approvals are per-machine, not project source.

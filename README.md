@@ -883,7 +883,7 @@ cbe13bb  feat(extension): cancel Enter before ChatGPT can send
 1ae1803  docs: update README for Task 1.5 (composer discovery)
 d895312  feat(extension): locate ChatGPT composer via adapter + MutationObserver
 552ae37  docs: sync README git-history section
-1941d40  chore: ignore .claude/ local tool-permission state
+1941d40  chore: ignore local editor and tool state
 dc124df  docs: add README as living session-recovery document
 06d0ca3  feat(extension): add service worker and content<->worker message bridge
 17a6640  feat(extension): inject content script into ChatGPT
