@@ -234,3 +234,17 @@
 {"id": "H062", "label": "benign", "category": "hard-negative", "difficulty": "hard", "expected": [], "text": "invoice 9876543210 is still unpaid in the ledger", "note": "G10 ten digits, invoice reference"}
 {"id": "H063", "label": "benign", "category": "hard-negative", "difficulty": "hard", "expected": [], "text": "the build ran for 3600 1800 900 seconds across the three stages", "note": "G10 loosely grouped digits that are durations"}
 {"id": "H064", "label": "benign", "category": "hard-negative", "difficulty": "hard", "expected": ["PHONE"], "text": "our support helpline is 1800 123 4567 and it is on the website", "note": "G10 a published support number, correctly allowed"}
+
+{"id": "S110", "label": "sensitive", "category": "pii-semantic", "difficulty": "hard", "expected": ["PERSON"], "text": "account holder Rahul Sharma has a balance of 45000 outstanding", "note": "G11 marker vocabulary: banking, not HR"}
+{"id": "S111", "label": "sensitive", "category": "pii-semantic", "difficulty": "hard", "expected": ["PERSON"], "text": "Sarah Chen, age 34, was diagnosed with type 2 diabetes last month", "note": "G11 marker vocabulary: clinical"}
+{"id": "S112", "label": "sensitive", "category": "pii-semantic", "difficulty": "hard", "expected": ["PERSON"], "text": "borrower Daniel Osei defaulted on the third instalment, what now", "note": "G11 marker vocabulary: lending"}
+{"id": "S113", "label": "sensitive", "category": "pii-semantic", "difficulty": "hard", "expected": ["PERSON"], "text": "the defendant Marcus Delgado has filed a counterclaim this week", "note": "G11 marker vocabulary: legal"}
+{"id": "S114", "label": "sensitive", "category": "pii-semantic", "difficulty": "hard", "expected": ["PERSON"], "text": "draft the exit interview questions for Aditya Shukla before friday", "note": "G11 marker vocabulary: employment"}
+{"id": "S115", "label": "sensitive", "category": "pii-semantic", "difficulty": "hard", "expected": ["PERSON"], "text": "referral for Rakesh Menon to the cardiology department is pending", "note": "G11 marker vocabulary: clinical referral"}
+
+{"id": "H065", "label": "benign", "category": "ordinary", "difficulty": "medium", "expected": ["PERSON"], "text": "what did Alan Turing contribute to modern computing", "note": "G12 public figure, no relationship language"}
+{"id": "H066", "label": "benign", "category": "ordinary", "difficulty": "medium", "expected": ["PERSON"], "text": "summarise Hannah Arendt on the origins of totalitarianism", "note": "G12 public figure"}
+{"id": "H067", "label": "benign", "category": "hard-negative", "difficulty": "hard", "expected": [], "text": "the average salary for a backend developer in bangalore", "note": "G12 a marker word with no person attached"}
+{"id": "H068", "label": "benign", "category": "hard-negative", "difficulty": "hard", "expected": [], "text": "I diagnosed the issue as a connection pool leak under load", "note": "G12 'diagnosed' in its technical sense"}
+{"id": "H069", "label": "benign", "category": "hard-negative", "difficulty": "hard", "expected": [], "text": "how do I file a claim against a null pointer in this stack trace", "note": "G12 'claim' and 'file' in ordinary usage"}
+{"id": "H070", "label": "benign", "category": "hard-negative", "difficulty": "hard", "expected": [], "text": "our compensation library handles retries and backoff automatically", "note": "G12 'compensation' as a software term"}

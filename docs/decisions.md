@@ -1233,6 +1233,60 @@ a loose pattern would cost the 0% false-positive rate that makes the tool usable
 
 ---
 
+## D48 — The marker vocabulary was written from one department's language
+
+**Context.** A user observed that detection seemed to depend on particular words, and was right.
+Measured against fourteen realistic phrasings of the same relationship, **four were caught**:
+
+```
+our client Rahul Sharma ...            caught
+account holder Rahul Sharma ...        MISSED
+the tenant Priya Menon ...             caught
+borrower Daniel Osei ...               MISSED
+the patient is Rakesh Menon ...        caught
+Sarah Chen was diagnosed with ...      MISSED
+```
+
+**The same relationship, named by a different department.** The original list came from HR and
+support vocabulary, because those were the words the corpus samples happened to use — and the
+corpus and the list were written by the same author, which [D34](#d34--data-subject-markers-are-a-documented-threat-to-validity)
+already flagged as a threat to validity. This is that threat materialising.
+
+**Chosen:** widen the list along departmental lines — banking (`account holder`, `borrower`,
+`cardholder`, `guarantor`), clinical (`diagnosed`, `referral for`, `next of kin`, `discharge
+summary`), legal (`defendant`, `plaintiff`, `counsel for`), insurance (`insured`, `nominee`), and
+employment terms the original set missed (`exit interview`, `probation`, `notice period`).
+
+**Measured: 4/14 → 13/14, at zero cost.** Corpus false-positive rate stayed at **0%** and recall
+rose 98.2% → 98.3% on a corpus grown from 218 to 230.
+
+**Why widening was safe here, when it was not for the credential labels.** [D46](#d46--passwords-the-gap-a-user-found-by-pasting-one)
+had to remove `key` and `pin` because each cost a false positive immediately. The difference is
+structural: a credential label **is** the evidence, so a common word becomes a false positive on its
+own. A data-subject marker only *amplifies* an existing `PERSON` finding — `salary`, `diagnosed`,
+`claim` and `compensation` in ordinary technical prose have no name to amplify, so they cost
+nothing. **Amplifying a signal is safer to broaden than producing one.**
+
+**The bottleneck has moved, and that is the more interesting result.** The single remaining miss is
+not a vocabulary problem:
+
+```
+"salary revision for Nadia Sherwood effective april"
+    spaCy labelled "Nadia Sherwood" as ORGANIZATION, not PERSON
+```
+
+Amplification applies only to `identity`, by the deliberate rule in [D33](#d33--the-risk-engine-scores-by-weighted-fusion-not-by-counting)
+that organisations are not data subjects. So the limit is now the NER model's entity labelling —
+the same weakness as `S098`, where a non-Western name was labelled `NRP`. **Further widening of the
+word list would not help; a better model or a name-aware fallback would.**
+
+**The structural limit, stated.** This remains a lexical rule, and no list is complete: a
+department, a language or an industry this project has not thought of is invisible to it. The
+honest framing is that the marker approach buys a large improvement cheaply and has a ceiling,
+which the ORGANIZATION mislabelling above shows is already close.
+
+---
+
 ## Still open
 
 | Question | Decide by |

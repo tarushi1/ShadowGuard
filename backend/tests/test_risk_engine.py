@@ -15,6 +15,8 @@ silently shipping.
 
 from dataclasses import replace
 
+import pytest
+
 from backend.app.core import risk
 from backend.app.core.policy import DEFAULT_POLICY
 from backend.app.detectors.base import Finding
@@ -307,3 +309,73 @@ def test_every_entity_type_has_a_class():
 
     missing = set(ENTITY_SEVERITY) - set(CLASS_OF)
     assert not missing, f"unclassified entity types: {sorted(missing)}"
+
+
+# ---------------------------------------------------------------
+# Data-subject vocabulary
+# ---------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "text, name_at",
+    [
+        ("account holder Rahul Sharma has a balance of 45000", (15, 27)),
+        ("Sarah Chen was diagnosed with type 2 diabetes", (0, 10)),
+        ("borrower Daniel Osei defaulted on the instalment", (9, 20)),
+        ("the defendant Marcus Delgado filed a counterclaim", (14, 28)),
+        ("draft the exit interview for Aditya Shukla", (29, 43)),
+        ("referral for Rakesh Menon to cardiology", (13, 25)),
+        ("the policyholder Meera Iyer has not renewed", (17, 27)),
+        ("the tenant Priya Menon is in arrears", (11, 22)),
+    ],
+)
+def test_relationship_language_from_any_department_is_recognised(text, name_at):
+    """The marker list was written from HR and support vocabulary only.
+
+    A user found that `our client Rahul Sharma` was caught while
+    `account holder Rahul Sharma` was not — the same relationship,
+    named by a different department. Banking, clinical, legal and
+    insurance language now sit alongside the original set.
+
+    Baseline before widening: 4 of 14 realistic phrasings caught.
+    """
+    start, end = name_at
+    result = assess([finding("PERSON", "low", score=0.85, start=start, end=end)], text)
+
+    assert result.action is not Action.ALLOW, f"not recognised as a data subject: {text}"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "the average salary for a backend developer in bangalore",
+        "I diagnosed the issue as a connection pool leak",
+        "how do I file a claim against a null pointer",
+        "our compensation library handles retries automatically",
+    ],
+)
+def test_marker_words_alone_prove_nothing(text):
+    """A marker with no person attached is just a word.
+
+    Widening the vocabulary is only safe because amplification requires
+    an `identity` finding to amplify. `salary`, `diagnosed`, `claim`
+    and `compensation` all occur in ordinary technical prose.
+    """
+    from backend.app.pipeline import orchestrator
+
+    assert orchestrator.run_stages(text).action is Action.ALLOW, f"false positive on: {text}"
+
+
+def test_a_public_figure_is_still_not_a_data_subject():
+    """The property the widening must not break.
+
+    Every word added is a chance to catch an ordinary sentence about a
+    well-known person. The distinction is relationship language, not
+    the presence of a name.
+    """
+    for text, span in [
+        ("explain how Satya Nadella restructured Microsoft", (12, 25)),
+        ("write a short biography of Ada Lovelace", (27, 39)),
+        ("what did Alan Turing contribute to computing", (9, 20)),
+    ]:
+        result = assess([finding("PERSON", "low", score=0.85, start=span[0], end=span[1])], text)
+        assert result.action is Action.ALLOW, f"false positive on: {text}"

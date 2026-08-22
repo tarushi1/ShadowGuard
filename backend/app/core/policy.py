@@ -108,18 +108,43 @@ CLASS_OF: dict[str, str] = {
 # write. That belongs in the report's threats-to-validity section, not
 # in a footnote. See D34.
 DATA_SUBJECT_MARKERS: tuple[str, ...] = (
-    # Relationship to the organisation
+    # ---- Relationship to the organisation -----------------------
     "client", "customer", "patient", "employee", "employees", "staff",
     "candidate", "applicant", "contractor", "vendor", "supplier",
     "tenant", "policyholder", "claimant", "beneficiary", "subscriber",
     "member", "student", "resident", "complainant", "whistleblower",
-    # Record and process types
+
+    # ---- Finance and banking ------------------------------------
+    # Added after a user found that "account holder Rahul Sharma" was
+    # missed while "our client Rahul Sharma" was caught — the same
+    # relationship in the vocabulary of a different department.
+    "account holder", "accountholder", "cardholder", "borrower",
+    "depositor", "guarantor", "payee", "remitter", "debtor",
+    "loan file", "credit file", "statement for", "arrears",
+
+    # ---- Insurance ----------------------------------------------
+    "insured", "nominee", "underwriting", "premium for",
+
+    # ---- Healthcare ---------------------------------------------
+    "diagnosed", "diagnosis", "prescription", "prescribed",
+    "medical notes", "medical record", "medical history",
+    "referral for", "discharge summary", "admitted to",
+    "next of kin", "deceased", "consultation",
+
+    # ---- Employment ---------------------------------------------
     "performance review", "appraisal", "termination", "redundancy",
     "disciplinary", "grievance", "background check", "onboarding",
-    "offboarding", "payroll", "medical notes", "medical record",
-    "diagnosis", "prescription", "case file", "case notes", "kyc",
-    "complaint", "claim", "dispute", "escalation", "ticket",
+    "offboarding", "payroll", "exit interview", "notice period",
+    "probation", "salary", "compensation", "resignation",
     "shortlist", "roster", "personnel", "hr",
+
+    # ---- Legal --------------------------------------------------
+    "defendant", "plaintiff", "respondent", "petitioner", "litigant",
+    "counsel for", "deposition", "settlement with",
+
+    # ---- Cases and records --------------------------------------
+    "case file", "case notes", "kyc", "complaint", "claim",
+    "dispute", "escalation", "ticket", "record for", "file for",
 )
 
 
