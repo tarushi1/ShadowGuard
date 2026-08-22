@@ -1120,6 +1120,13 @@ login: admin  pwd: letmein123             allow   score 0   []
 postgres://user:s3cret@localhost/app      allow   score 0   []
 ```
 
+> **Every credential-shaped string in this repository is synthetic.** The one that prompted this
+> decision was real, and it was written into a source comment as an illustration before anyone
+> thought about where source comments end up — which is in the git history of a repository intended
+> to be shared with an examiner. It was replaced with `sparrow419`, a value of the same shape and no
+> value, and purged from history. Worth stating because it is the project's own failure mode
+> happening to the project: sensitive data leaking through a channel nobody classified as a channel.
+
 **Nothing in the system could have caught them, and the reason is instructive.** A password has
 **no format**. `sparrow419` is shaped exactly like a username, a filename or a variable name — there
 is no pattern to match, no checksum to validate, no vendor prefix to anchor on. And a short
