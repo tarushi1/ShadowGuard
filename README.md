@@ -110,7 +110,7 @@ like code, and only executable checks notice — which is why a few agreements a
 | **Last updated** | 2026-08-23 |
 | **Review-I** | ✅ **completed 19 Aug 2026** |
 | **Project root** | `/Users/arushitiwari/Desktop/ShadowGuard` |
-| **Git branch** | `main` (83 commits, working tree clean) — **nothing pushed to the remote yet** |
+| **Git branch** | `main` (84 commits, working tree clean) — **nothing pushed to the remote yet** |
 | **Current stage** | Stages 0–4 live: interception, regex, entropy, semantic, OCR, risk engine, redaction, persistence — for text **and** images, on ChatGPT and (unverified) Gemini. |
 | **Completed** | **Weeks 1–7 complete.** Gemini adapter written but **not verified against the live site**. |
 | **Next task** | **Week 8 — hardening, report, diagrams, demo.** Also open: close bypass B1, live-verify Gemini, improve OCR retention for `GOOGLE_API_KEY` and `JWT` (both 0%) |
