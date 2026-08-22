@@ -310,13 +310,50 @@
   }
 
   // ---------------------------------------------------------------
-  // Image interception
+  // Attachment interception
   // ---------------------------------------------------------------
-  const imageInterceptor = new SG.ImageInterceptor(adapter, handleImage);
-  imageInterceptor.start();
+  const attachmentInterceptor = new SG.AttachmentInterceptor(adapter, handleAttachment);
+  attachmentInterceptor.start();
 
   /**
-   * Decide whether one attached image may go through.
+   * The two attachment kinds, and everything that differs between them.
+   *
+   * Gathered into one table rather than scattered through `if
+   * (isPdf)` branches, because the handling below is genuinely
+   * identical apart from these five values — and a branch per
+   * difference is how one path quietly stops matching the other.
+   */
+  const KINDS = {
+    image: {
+      message: SG.MSG.ANALYZE_IMAGE,
+      maxBytes: SG.CONFIG.MAX_IMAGE_BYTES,
+      noun: "image",
+      /** What was READ, never what it said. */
+      preview: (v) =>
+        `image · ${v.ocr?.width}×${v.ocr?.height} · ` +
+        `${v.ocr?.words ?? 0} words read at ` +
+        `${Math.round((v.ocr?.confidence ?? 0) * 100)}% confidence`,
+      logged: (v) =>
+        `read ${v.ocr?.words ?? 0} words at ` +
+        `${Math.round((v.ocr?.confidence ?? 0) * 100)}% confidence`,
+    },
+    pdf: {
+      message: SG.MSG.ANALYZE_PDF,
+      maxBytes: SG.CONFIG.MAX_PDF_BYTES,
+      noun: "PDF",
+      preview: (v) =>
+        `PDF · ${v.pdf?.pages_read ?? 0}/${v.pdf?.pages ?? 0} pages · ` +
+        `${v.pdf?.characters ?? 0} characters read` +
+        (v.pdf?.sources?.length ? ` from ${v.pdf.sources.join(", ")}` : "") +
+        (v.pdf?.has_text_layer === false ? " · NO TEXT LAYER" : ""),
+      logged: (v) =>
+        `${v.pdf?.characters ?? 0} chars from ${v.pdf?.pages_read ?? 0} page(s)` +
+        (v.pdf?.has_text_layer === false ? ", no text layer" : ""),
+    },
+  };
+
+  /**
+   * Decide whether one attached file may go through.
    *
    * Runs at ATTACH time, not send time, and the difference is the
    * whole point: by send time ChatGPT has already uploaded the file to
@@ -327,20 +364,22 @@
    * @param {{trigger: string}} context
    * @returns {Promise<boolean>} true to let it through
    */
-  async function handleImage(file, context) {
+  async function handleAttachment(file, context) {
+    const kind = file.type === "application/pdf" ? KINDS.pdf : KINDS.image;
+
     if (modal.isOpen) {
-      console.debug(`${TAG} a decision is already pending — dropping this image.`);
+      console.debug(`${TAG} a decision is already pending — dropping this file.`);
       return false;
     }
 
-    // Checked here as well as on the server. Uploading eight megabytes
+    // Checked here as well as on the server. Uploading twenty megabytes
     // to be told 413 wastes the user's time on a request that could
     // only ever fail.
-    if (file.size > SG.CONFIG.MAX_IMAGE_BYTES) {
+    if (file.size > kind.maxBytes) {
       const decision = await modal.show({
         variant: "offline",
         message:
-          `This image is ${(file.size / 1024 / 1024).toFixed(1)}MB, larger than ` +
+          `This ${kind.noun} is ${(file.size / 1024 / 1024).toFixed(1)}MB, larger than ` +
           `ShadowGuard can inspect. It has NOT been checked for sensitive content.`,
         allowProceed: SG.CONFIG.FAIL_MODE === "open",
       });
@@ -350,9 +389,9 @@
 
     const started = performance.now();
     const result = await ask({
-      type: SG.MSG.ANALYZE_IMAGE,
+      type: kind.message,
       payload: {
-        image_b64: await toBase64(file),
+        file_b64: await toBase64(file),
         mime: file.type,
         platform: adapter.id,
         trigger: context.trigger,
@@ -362,14 +401,16 @@
 
     // ---- Backend unreachable: fail open, but visibly -------------
     if (!result?.ok) {
-      console.warn(`${TAG} could not analyse image — ${result?.error ?? "no response"}`);
+      console.warn(
+        `${TAG} could not analyse ${kind.noun} — ${result?.error ?? "no response"}`
+      );
 
       const decision = await modal.show({
         variant: "offline",
         message: result?.disconnected
-          ? "ShadowGuard was reloaded while this page was open, so this image " +
+          ? `ShadowGuard was reloaded while this page was open, so this ${kind.noun} ` +
             "has NOT been checked. Reload the page to restore protection."
-          : "ShadowGuard could not check this image for sensitive content. " +
+          : `ShadowGuard could not check this ${kind.noun} for sensitive content. ` +
             "Attach it only if you are confident it is safe.",
         allowProceed: SG.CONFIG.FAIL_MODE === "open",
       });
@@ -380,11 +421,28 @@
     const verdict = result.verdict;
 
     console.log(
-      `${TAG} image (${context.trigger}) → ${verdict.action.toUpperCase()} ` +
-      `(score ${verdict.score}, read ${verdict.ocr?.words ?? 0} words at ` +
-      `${Math.round((verdict.ocr?.confidence ?? 0) * 100)}% confidence, ` +
+      `${TAG} ${kind.noun} (${context.trigger}) → ${verdict.action.toUpperCase()} ` +
+      `(score ${verdict.score}, ${kind.logged(verdict)}, ` +
       `${Math.round(performance.now() - started)}ms, id ${verdict.request_id})`
     );
+
+    // ---- Unreadable is not clean --------------------------------
+    // A scanned or password-protected PDF yields no text, so it scores
+    // zero and comes back `allow` — which is CORRECT as a verdict and
+    // dangerous as a silence. Letting it through unremarked would make
+    // "print it, scan it, attach it" a one-step bypass of every rule in
+    // the system. The server already says so in `message`; this is
+    // where the user gets told.
+    if (verdict.pdf && verdict.pdf.has_text_layer === false) {
+      const decision = await modal.show({
+        variant: "changed",
+        message: verdict.message,
+        preview: kind.preview(verdict),
+        allowProceed: SG.CONFIG.FAIL_MODE === "open",
+      });
+
+      return decision === "proceed";
+    }
 
     if (verdict.action === SG.ACTION.ALLOW) return true;
 
@@ -398,10 +456,7 @@
       // do not own, and putting the extracted text on screen would
       // display the secret we just found — the same mistake as logging
       // it, with an audience.
-      preview:
-        `image · ${verdict.ocr?.width}×${verdict.ocr?.height} · ` +
-        `${verdict.ocr?.words ?? 0} words read at ` +
-        `${Math.round((verdict.ocr?.confidence ?? 0) * 100)}% confidence`,
+      preview: kind.preview(verdict),
 
       allowProceed: verdict.action !== SG.ACTION.BLOCK,
     });
@@ -467,7 +522,7 @@
         // never arrive, and the user cannot use ChatGPT at all until
         // they reload.
         interceptor.enabled = false;
-        imageInterceptor.enabled = false;
+        attachmentInterceptor.enabled = false;
 
         console.warn(
           `%c ${TAG} DISCONNECTED `,
@@ -851,8 +906,8 @@
     /** Where would send() route right now? Useful when replay misbehaves. */
     sendButton: () => adapter.findSendButton(),
 
-    /** The image interceptor — paste and file-input paths. */
-    imageInterceptor,
+    /** The attachment interceptor — paste and file-input paths. */
+    attachmentInterceptor,
 
     /** The modal instance. Its shadow root is closed, so this is the only handle. */
     modal,

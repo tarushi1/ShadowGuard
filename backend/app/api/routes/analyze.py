@@ -21,7 +21,12 @@ from fastapi.concurrency import run_in_threadpool
 
 from ...db import events as event_store
 from ...pipeline import orchestrator
-from ...schemas.analyze import MAX_IMAGE_BYTES, AnalyzeRequest, AnalyzeResponse
+from ...schemas.analyze import (
+    MAX_IMAGE_BYTES,
+    MAX_PDF_BYTES,
+    AnalyzeRequest,
+    AnalyzeResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -177,6 +182,91 @@ async def analyze_image(
         client_version=client_version,
         char_count=len(extracted.text),
         source="image",
+    )
+
+    return result
+
+
+@router.post("/analyze/pdf", response_model=AnalyzeResponse)
+async def analyze_pdf(
+    background: BackgroundTasks,
+    file: UploadFile = File(description="PDF document to inspect."),
+    user_id: str = Form(...),
+    platform: str = Form("chatgpt"),
+    trigger: str | None = Form(None),
+    client_version: str | None = Form(None),
+) -> AnalyzeResponse:
+    """Inspect a PDF the user is about to attach.
+
+    A third endpoint rather than a `kind` parameter on the image one.
+    They share a request shape and nothing else: different size limits,
+    different failure modes, different metadata coming back. One
+    endpoint branching on file type would document neither.
+
+    Nothing is written to disk. The bytes go from the request into
+    memory, through the parser, and out of scope when this returns —
+    only entity types and measurements survive (D41). That property is
+    worth restating for documents specifically, because a PDF can
+    carry far more sensitive material than a chat message, and the
+    temptation to keep "just the extracted text, for debugging" is
+    correspondingly larger.
+    """
+    payload = await file.read()
+
+    if len(payload) > MAX_PDF_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"PDF exceeds {MAX_PDF_BYTES // (1024 * 1024)}MB",
+        )
+
+    if not payload:
+        raise HTTPException(status_code=422, detail="empty upload")
+
+    try:
+        # Off the event loop. Parsing is CPU-bound and, on a document
+        # built to be expensive, unbounded in a way OCR is not — a
+        # single hostile file must not stall every other request.
+        result, extracted = await run_in_threadpool(orchestrator.analyze_pdf, payload)
+    except RuntimeError as error:
+        logger.error("PDF support unavailable: %s", error)
+        raise HTTPException(
+            status_code=503, detail="PDF inspection is not available"
+        ) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    # Logs the SHAPE of the document, never a word of its contents.
+    # `text_layer` is in here deliberately: the report needs to be able
+    # to answer "how many PDFs did we fail to read at all?", and that
+    # number is invisible from the action alone, since an unread
+    # document and a clean one both come back `allow`.
+    logger.info(
+        "analyze-pdf id=%s user=%s platform=%s bytes=%d pages=%d/%d "
+        "text_layer=%s sources=%s chars=%d action=%s score=%d entities=%s latency=%.2fms",
+        result.request_id,
+        user_id,
+        platform,
+        len(payload),
+        extracted.pages_read,
+        extracted.page_count,
+        extracted.has_text_layer,
+        list(extracted.sources),
+        extracted.char_count,
+        result.action.value,
+        result.score,
+        [e.type for e in result.entities],
+        result.latency_ms,
+    )
+
+    background.add_task(
+        event_store.record_decision,
+        result,
+        user_id=user_id,
+        platform=platform,
+        trigger=trigger,
+        client_version=client_version,
+        char_count=extracted.char_count,
+        source="pdf",
     )
 
     return result

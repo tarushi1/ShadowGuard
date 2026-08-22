@@ -45,6 +45,15 @@ MAX_TEXT_LENGTH = 100_000
 # that is really a file transfer.
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 
+# Larger than an image, and for a reason worth stating rather than
+# assuming. A screenshot is one screen; a PDF is a document, and a
+# perfectly ordinary scanned contract or exported report runs past 8 MB
+# without being an attack. The cap that actually protects the backend
+# here is not the byte count anyway — it is the page and character
+# limits in `detectors/pdf.py`, because a 20 KB PDF can decompress into
+# gigabytes of text while a 20 MB one is often just a photograph.
+MAX_PDF_BYTES = 20 * 1024 * 1024
+
 
 class Action(str, Enum):
     """What the extension should do with this message.
@@ -174,6 +183,37 @@ class OcrInfo(BaseModel):
     height: int
 
 
+class PdfInfo(BaseModel):
+    """What Stage 3b read out of a document, described without quoting it.
+
+    Same rule as `OcrInfo`: every field is a MEASUREMENT of the
+    extracted text, never the text. `characters` says how much was
+    read; nothing here says what.
+
+    `has_text_layer` is the field that carries weight. False means the
+    document was a scan and this stage found nothing to read — an
+    absence of evidence, not evidence of absence. It is surfaced to the
+    client so the modal can say "this looks like a scanned document and
+    was not inspected" rather than showing the silence as a clean bill
+    of health.
+    """
+
+    characters: int = Field(description="How much text was read. Not the text.")
+    pages: int
+    pages_read: int
+    has_text_layer: bool
+    truncated: bool = False
+    encrypted: bool = False
+    sources: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Which channels yielded text: pages, metadata, annotations, forms. "
+            "Kept because it is the only way to answer 'is reading annotations "
+            "worth the code?' with data rather than intuition."
+        ),
+    )
+
+
 class AnalyzeResponse(BaseModel):
     """The verdict. The extension acts on `action` and shows the rest."""
 
@@ -227,6 +267,11 @@ class AnalyzeResponse(BaseModel):
     ocr: OcrInfo | None = Field(
         default=None,
         description="Present only when the input was an image (Stage 3).",
+    )
+
+    pdf: PdfInfo | None = Field(
+        default=None,
+        description="Present only when the input was a PDF (Stage 3b).",
     )
 
     reasons: list[str] = Field(

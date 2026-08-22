@@ -25,6 +25,7 @@ globalThis.SG.CONFIG = Object.freeze({
 
   ANALYZE_PATH: "/api/v1/analyze",
   ANALYZE_IMAGE_PATH: "/api/v1/analyze/image",
+  ANALYZE_PDF_PATH: "/api/v1/analyze/pdf",
 
   /**
    * Images get their own, longer budget.
@@ -46,6 +47,18 @@ globalThis.SG.CONFIG = Object.freeze({
    * that looks like a network problem.
    */
   MAX_IMAGE_BYTES: 8 * 1024 * 1024,
+
+  /**
+   * Mirrors MAX_PDF_BYTES in schemas/analyze.py.
+   *
+   * Larger than the image cap because a screenshot is one screen and a
+   * document is a document: an ordinary scanned contract passes 8MB
+   * without being an attack. The limit that actually protects the
+   * backend from a PDF is not this one anyway — it is the page and
+   * character caps in detectors/pdf.py, since a 20KB file can
+   * decompress into gigabytes of text.
+   */
+  MAX_PDF_BYTES: 20 * 1024 * 1024,
   HEALTH_PATH: "/health",
 
   /**

@@ -92,10 +92,18 @@ async function getUserId() {
  * once, in memory, on a local machine — and the request that leaves
  * this worker is still multipart.
  *
- * @param {object} payload  {image_b64, mime, platform, trigger, ...}
+ * Takes the endpoint as an argument rather than branching inside,
+ * because the two uploads differ only in where they are POSTed. The
+ * base64 hop, the byte decoding, the multipart body, the timeout and
+ * every failure path are identical, and duplicating them for PDFs
+ * would mean two copies of the atob comment below that drift apart.
+ *
+ * @param {object} payload  {file_b64, mime, platform, trigger, ...}
+ * @param {object} options  {path, label} which endpoint, and what to
+ *                          call it in the logs
  */
-async function requestImageAnalysis(payload) {
-  const url = `${SG.CONFIG.BACKEND_URL}${SG.CONFIG.ANALYZE_IMAGE_PATH}`;
+async function requestFileAnalysis(payload, { path, label }) {
+  const url = `${SG.CONFIG.BACKEND_URL}${path}`;
 
   // A far longer budget than text. OCR on a screenshot is ~200-400ms
   // of real CPU work against ~4ms for text, and aborting a request
@@ -111,7 +119,7 @@ async function requestImageAnalysis(payload) {
     // with charCodeAt is the standard way to get real bytes out of it,
     // because a JS string is UTF-16 and would otherwise corrupt every
     // byte above 0x7F — which is most of a PNG.
-    const binary = atob(payload.image_b64);
+    const binary = atob(payload.file_b64);
     const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
 
     const form = new FormData();
@@ -139,8 +147,11 @@ async function requestImageAnalysis(payload) {
     const roundTripMs = Math.round(performance.now() - startedAt);
 
     console.log(
-      `${TAG} image verdict ${verdict.action} score=${verdict.score} ` +
-      `ocr=${verdict.ocr?.words ?? 0}w conf=${verdict.ocr?.confidence ?? 0} ` +
+      `${TAG} ${label} verdict ${verdict.action} score=${verdict.score} ` +
+      (verdict.pdf
+        ? `pages=${verdict.pdf.pages_read}/${verdict.pdf.pages} ` +
+          `layer=${verdict.pdf.has_text_layer} `
+        : `ocr=${verdict.ocr?.words ?? 0}w conf=${verdict.ocr?.confidence ?? 0} `) +
       `server=${verdict.latency_ms}ms roundtrip=${roundTripMs}ms id=${verdict.request_id}`
     );
 
@@ -151,7 +162,7 @@ async function requestImageAnalysis(payload) {
         ? `no response within ${SG.CONFIG.IMAGE_TIMEOUT_MS}ms`
         : error.message;
 
-    console.warn(`${TAG} image analysis failed — ${reason}`);
+    console.warn(`${TAG} ${label} analysis failed — ${reason}`);
     return { ok: false, error: reason };
   } finally {
     clearTimeout(timer);
@@ -261,7 +272,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case SG.MSG.ANALYZE_IMAGE: {
       (async () => {
         const userId = await getUserId();
-        const result = await requestImageAnalysis({ ...message.payload, user_id: userId });
+        const result = await requestFileAnalysis(
+          { ...message.payload, user_id: userId },
+          { path: SG.CONFIG.ANALYZE_IMAGE_PATH, label: "image" }
+        );
+        sendResponse(result);
+      })();
+
+      break;
+    }
+
+    case SG.MSG.ANALYZE_PDF: {
+      (async () => {
+        const userId = await getUserId();
+        const result = await requestFileAnalysis(
+          { ...message.payload, user_id: userId },
+          { path: SG.CONFIG.ANALYZE_PDF_PATH, label: "pdf" }
+        );
         sendResponse(result);
       })();
 

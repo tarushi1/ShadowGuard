@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ShadowGuard AI",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "description": "Context-aware multimodal data loss prevention for enterprise interactions with generative AI platforms.",
   "action": {
     "default_title": "ShadowGuard AI"
@@ -31,7 +31,7 @@
         "src/adapters/gemini.js",
         "src/content/composer_watcher.js",
         "src/content/interceptor.js",
-        "src/content/image_interceptor.js",
+        "src/content/attachment_interceptor.js",
         "src/ui/modal.js",
         "src/content/content.js"
       ],

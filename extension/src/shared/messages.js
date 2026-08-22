@@ -63,6 +63,14 @@ globalThis.SG.MSG = Object.freeze({
    * file exists to prevent.
    */
   ANALYZE_IMAGE: "SG_ANALYZE_IMAGE",
+
+  /**
+   * A PDF to inspect. Separate from ANALYZE_IMAGE for the same reason
+   * that one is separate from ANALYZE_REQUEST: a different endpoint, a
+   * different size limit, and a different shape of answer coming back
+   * (pages and channels rather than dimensions and confidence).
+   */
+  ANALYZE_PDF: "SG_ANALYZE_PDF",
   USER_DECISION: "SG_USER_DECISION",
 });
 

@@ -40,7 +40,20 @@ spacy==3.8.14
 pytesseract==0.3.13
 Pillow==12.3.0
 
-# Multipart form parsing, for the image upload endpoint. FastAPI needs
+# ---- PDF (Stage 3b) ----
+# Pure Python, unlike Tesseract: there is no engine to install
+# separately, which is the reason it was chosen over the alternatives.
+# pdf2image would have needed poppler as a system package, and PyMuPDF
+# is AGPL-3.0 — fine for coursework, but a licence obligation that has
+# to be declared and that forbids closed-source distribution.
+#
+# The cost of that choice is stated rather than hidden: pypdf reads the
+# text layer and cannot rasterise a scanned page, so a scan yields
+# nothing. That is reported to the user as UNREAD rather than clean —
+# see D53 and bypass B16.
+pypdf==6.16.1
+
+# Multipart form parsing, for the image and PDF upload endpoints. FastAPI needs
 # it present to accept UploadFile at all and fails at import time
 # without it, which is a confusing way to learn about a missing
 # dependency.

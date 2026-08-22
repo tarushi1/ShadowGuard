@@ -1,9 +1,14 @@
 /**
- * ShadowGuard AI — Image interception
+ * ShadowGuard AI — Attachment interception
  * ================================================================
- * Stops an image reaching the page until the backend has read it.
+ * Stops a file reaching the page until the backend has read it.
  *
- * Two ways an image gets into ChatGPT, and they need different
+ * Images (Stage 3, via OCR) and PDFs (Stage 3b, via the text layer).
+ * The two are handled identically HERE and differently on the server,
+ * which is the right split: what a file is only matters once someone
+ * has to read it, and this class's job is to stop it travelling.
+ *
+ * Two ways a file gets into ChatGPT, and they need different
  * treatment:
  *
  *   PASTE       Cmd+V with a screenshot on the clipboard. A `paste`
@@ -42,9 +47,9 @@
   const TAG = "[ShadowGuard]";
 
   /**
-   * Watches for images being attached, and holds them.
+   * Watches for files being attached, and holds them.
    */
-  class ImageInterceptor {
+  class AttachmentInterceptor {
     /**
      * @param {object}   adapter       the platform adapter
      * @param {function} onIntercept   (file, context) => Promise<boolean>
@@ -87,12 +92,26 @@
       window.removeEventListener("change", this._onChange, true);
     }
 
-    /** Images on a clipboard or drag payload, ignoring everything else. */
-    #imagesIn(transfer) {
+    /**
+     * Inspectable attachments on a clipboard or file input.
+     *
+     * Two kinds, and the list is deliberately a WHITELIST rather than
+     * "everything that is not text". A file type ShadowGuard cannot
+     * read must travel the path it always did — holding back a .docx
+     * we have no parser for would block the user's work to achieve
+     * nothing, which is how a control gets uninstalled.
+     *
+     * What is here is what the backend can actually inspect:
+     *
+     *   image/*           Stage 3, via OCR
+     *   application/pdf   Stage 3b, via the text layer
+     */
+    #inspectableIn(transfer) {
       if (!transfer) return [];
 
-      return [...(transfer.files ?? [])].filter((file) =>
-        file.type.startsWith("image/")
+      return [...(transfer.files ?? [])].filter(
+        (file) =>
+          file.type.startsWith("image/") || file.type === "application/pdf"
       );
     }
 
@@ -104,15 +123,15 @@
     async #onPaste(event) {
       if (!this.enabled) return;
 
-      const images = this.#imagesIn(event.clipboardData);
-      if (images.length === 0) return; // ordinary text paste, not ours
+      const files = this.#inspectableIn(event.clipboardData);
+      if (files.length === 0) return; // ordinary text paste, not ours
 
       this.stats.seen++;
 
       // Our own replay. Approved once, let through forever.
-      if (images.every((file) => this.approved.has(file))) {
+      if (files.every((file) => this.approved.has(file))) {
         this.stats.passed++;
-        console.debug(`${TAG} image paste passed through — already approved`);
+        console.debug(`${TAG} paste passed through — already approved`);
         return;
       }
 
@@ -124,12 +143,12 @@
       this.stats.intercepted++;
 
       console.log(
-        `%c ${TAG} IMAGE HELD `,
+        `%c ${TAG} ATTACHMENT HELD `,
         "background:#8a4b00; color:#fff; padding:2px 6px; border-radius:3px;",
-        `${images.length} image(s) via paste`
+        `${files.length} file(s) via paste`
       );
 
-      for (const file of images) {
+      for (const file of files) {
         const allowed = await this.onIntercept(file, { trigger: "paste" });
 
         if (allowed) this.#replayPaste(file, event.target);
@@ -172,12 +191,12 @@
       const input = event.target;
       if (!(input instanceof HTMLInputElement) || input.type !== "file") return;
 
-      const images = this.#imagesIn(input);
-      if (images.length === 0) return;
+      const files = this.#inspectableIn(input);
+      if (files.length === 0) return;
 
       this.stats.seen++;
 
-      if (images.every((file) => this.approved.has(file))) {
+      if (files.every((file) => this.approved.has(file))) {
         this.stats.passed++;
         console.debug(`${TAG} file input passed through — already approved`);
         return;
@@ -193,13 +212,13 @@
       this.stats.intercepted++;
 
       console.log(
-        `%c ${TAG} IMAGE HELD `,
+        `%c ${TAG} ATTACHMENT HELD `,
         "background:#8a4b00; color:#fff; padding:2px 6px; border-radius:3px;",
-        `${images.length} image(s) via file input`
+        `${files.length} file(s) via file input`
       );
 
       const approved = [];
-      for (const file of images) {
+      for (const file of files) {
         if (await this.onIntercept(file, { trigger: "file-input" })) {
           approved.push(file);
         }
@@ -232,5 +251,5 @@
   }
 
   globalThis.SG = globalThis.SG || {};
-  globalThis.SG.ImageInterceptor = ImageInterceptor;
+  globalThis.SG.AttachmentInterceptor = AttachmentInterceptor;
 })();

@@ -1501,3 +1501,92 @@ caller that forgets the guard should get a refused send rather than a silent byp
 
 **Verified by re-introducing the bug.** Restoring the warn-and-send behaviour fails four of the six
 new tests. A regression test that does not fail against the original defect is decoration.
+
+---
+
+## D53 — PDFs are a second text source, and a document is not one thing
+
+**Context.** Users attach documents to ChatGPT as readily as they paste screenshots, and a PDF is
+a far denser carrier of sensitive material than a chat message — a contract, an export, a claim
+form. Nothing in Stages 0–4 looked at one.
+
+**Chosen:** a second **text source**, not a new detection stage.
+
+D41 established that Stage 3 does not detect anything: OCR produces text and hands it to the
+pipeline that already exists. Stage 3b does the same from a different artefact. Every rule,
+threshold, risk weight, redaction policy and storage guarantee below that line is reused unchanged
+— this adds an **input**, not a stage. That is the layering paying for itself, and it is worth
+saying in the report that the entire PDF capability required no change to any detector.
+
+### The part that is not obvious: five channels, four invisible
+
+"The text of a PDF" is not one thing. The same file holds text in five places:
+
+| Channel | Why it matters |
+|---|---|
+| Page text | What a human sees |
+| **Metadata** | Author, Title, Producer, Keywords — put there by the *software*, not the author, which is exactly why nobody checks it before sharing. Routinely carries real names, internal usernames, full filesystem paths |
+| **Annotations** | Reviewer comments and sticky notes. Often the most candid text in a document, and never printed |
+| **Form fields** | The page draws the *questions*; the field dictionary holds the *answers*. Extracting page text from a completed insurance claim reads the labels and misses the claimant |
+| **Text under a redaction box** | See below |
+
+**Text under a redaction box is the strongest argument for the whole module.** Drawing a filled
+rectangle over a paragraph does not remove the paragraph. The characters stay in the content
+stream, in order, fully selectable, with an opaque shape painted on top afterwards. Courts, law
+firms and government agencies have repeatedly published "redacted" filings whose text could be
+recovered by selecting it.
+
+Every other channel ShadowGuard watches catches a secret whose sender **knew it was there**. This
+one catches a secret whose sender is **certain they already removed it** — which is the only case
+in the system where the tool knows something the user does not.
+
+### The library choice, and what it costs
+
+| Option | Verdict |
+|---|---|
+| **pypdf** | **Chosen.** Pure Python — no system package, so nothing extra to install on a demo machine. MIT |
+| pdf2image + poppler | Rasterises scanned pages, but adds a system dependency that must be present on any machine running the demo. One more thing to fail in an exam room |
+| PyMuPDF | Fastest, and does text, rasterisation and embedded-image extraction in one library. **AGPL-3.0** — acceptable for coursework, but a licence obligation that must be declared and that forbids closed-source distribution |
+
+**The cost is stated rather than discovered.** pypdf reads a text layer and cannot rasterise, so a
+scanned document yields nothing. That produces two named bypasses — [B16](security.md) (scan the
+document) and [B17](security.md) (hide it in an embedded image) — rather than an unexamined gap.
+
+### Unreadable is not clean
+
+A scanned PDF extracts to nothing, scores zero, and the correct verdict is `allow`. The **silence
+around that verdict** is the danger: unremarked, "print it, scan it, attach it" defeats every rule
+in the system in one step.
+
+So `has_text_layer` is a first-class field on the response rather than a private detail, and the
+message the user reads is *"this PDF has no text layer and has NOT been checked"* — never *"no
+sensitive content found"*. A test asserts the clean sentence and the unread sentence are different
+strings, because the way this fails is by someone helpfully unifying them.
+
+This is the same distinction Stage 3 draws with OCR confidence, and the same one D12 draws with
+fail-open: **being told you are unprotected is meaningfully different from being silently
+unprotected.**
+
+### Where this beats OCR, and why that is measurable
+
+A born-digital PDF has a real text layer, so extraction is **exact** — no recognition, no
+confidence, no character confusion. `GOOGLE_API_KEY` and `JWT` survive OCR **0%** of the time
+([B11](security.md)), so the same key is caught in a PDF and missed in a screenshot of that PDF.
+The document path should be the **strongest** of the three channels, and `source` is stored
+per-decision so that claim can be checked against real traffic rather than argued.
+
+### Limits, because a parser is an attack surface
+
+PDF parsing means interpreting a complex format from an untrusted source in the process that serves
+the API. Three caps, all in `detectors/pdf.py`: **200 pages**, **2,000,000 extracted characters**,
+**5,000 annotations**. The character cap is the one that matters — a 20 KB file can decompress into
+gigabytes of text, so counting pages alone protects nothing.
+
+Long documents are **truncated and reported as truncated**, not rejected: a 5,000-page export is
+far likelier to be genuine than hostile, and refusing it outright pushes the user to send it
+unchecked. Exception handling throughout is deliberately broad, because a malformed annotation
+dictionary must cost that annotation — not the document, and never the process.
+
+**Naming.** `ImageInterceptor` became `AttachmentInterceptor` in the same change. A class that
+intercepts PDFs while calling itself an image interceptor is a comment that has started lying, and
+this codebase is not worth much if its names cannot be trusted.

@@ -14,7 +14,7 @@ It computes a risk score and decides whether to **allow**, **warn**, **redact**,
 
 > Read `README.md` and `docs/decisions.md` in this repo, in that order, before doing anything else.
 > `README.md` is the session-recovery document: it has current state, the exact next task, and the
-> mentoring contract I work under. `docs/decisions.md` is the decision log (D1–D52) — every choice
+> mentoring contract I work under. `docs/decisions.md` is the decision log (D1–D53) — every choice
 > and its reasoning, so you don't re-litigate settled decisions or contradict them. Then tell me
 > what you understand the next task to be, and wait for me to confirm before writing code.
 
@@ -23,7 +23,7 @@ It computes a risk score and decides whether to **allow**, **warn**, **redact**,
 | File | What it gives a fresh session |
 |---|---|
 | **`README.md`** | State, next task, roadmap, how to run everything, measured results, the mentoring contract |
-| **`docs/decisions.md`** | **D1–D52** — why every choice was made, and what was rejected. This is what stops a new session undoing settled work |
+| **`docs/decisions.md`** | **D1–D53** — why every choice was made, and what was rejected. This is what stops a new session undoing settled work |
 
 If it needs more, point it at the [knowledge base index](docs/README.md) — but don't paste those
 up front. A session that reads everything before starting spends its context on history instead of
@@ -68,7 +68,7 @@ than silently replacing broken code.
 
 **It is a security project, so say the uncomfortable things.** Point out risks, false positives,
 false negatives, privacy concerns, ethical problems and limitations without being asked. Bypasses
-are tracked in [docs/security.md](docs/security.md) as **B1–B15**, several of which this design
+are tracked in [docs/security.md](docs/security.md) as **B1–B17**, several of which this design
 created on purpose. Volunteering a weakness is far stronger than being asked about it.
 
 **Keep `README.md` and `docs/` current at all times**, not at the end. Documentation drifts exactly
@@ -111,10 +111,10 @@ like code, and only executable checks notice — which is why a few agreements a
 | **Review-I** | ✅ **completed 19 Aug 2026** |
 | **Project root** | `/Users/arushitiwari/Desktop/ShadowGuard` |
 | **Git branch** | `main` (86 commits, working tree clean). **Nothing pushed yet** — GitHub push protection rejects the push because `evaluation/data/corpus.jsonl` contains vendor-shaped API keys. They are synthetic (several are character rotations of each other), so this is a false positive of exactly the kind this project measures. Unblock each via the links in the push output, or turn push protection off in repo settings, then `git push -u origin main`. |
-| **Current stage** | Stages 0–4 live: interception, regex, entropy, semantic, OCR, risk engine, redaction, persistence — for text **and** images, on ChatGPT and (unverified) Gemini. |
+| **Current stage** | Stages 0–4 live: interception, regex, entropy, semantic, OCR, PDF, risk engine, redaction, persistence — for text, images **and PDFs**, on ChatGPT and (unverified) Gemini. |
 | **Completed** | **Weeks 1–7 complete.** Gemini adapter written but **not verified against the live site**. |
 | **Next task** | **Week 8 — hardening, report, diagrams, demo.** Also open: live-verify the Gemini adapter, improve OCR retention for `GOOGLE_API_KEY` and `JWT` (both 0%, bypass B11) |
-| **Tests** | **316 Python** (`pytest -q`) · **73 JavaScript** (`npm test`) · extension **v0.12.0** |
+| **Tests** | **336 Python** (`pytest -q`) · **73 JavaScript** (`npm test`) · extension **v0.13.0** |
 | **Measured** | 230-sample corpus — text: recall **98.3%**, FPR **0%**, F1 **99.1%** (regex alone **75.7%**) · images: OCR retention **93.9%**, OCR-induced FPR **2.0%** |
 | **Deadline** | ~2026-09-20 (8 weeks from 2026-07-26) |
 | **Weeks elapsed** | **3.3 of 8**, with 6 weeks of plan delivered — well ahead |
@@ -532,7 +532,7 @@ ShadowGuard/
 │   ├── app/
 │   │   ├── main.py             FastAPI app, CORS, lifespan (warms spaCy, opens the store).
 │   │   ├── api/routes/
-│   │   │   ├── analyze.py      HTTP only — parse, call pipeline, log, persist, respond.
+│   │   │   ├── analyze.py      HTTP only — /analyze, /analyze/image, /analyze/pdf.
 │   │   │   └── dashboard.py    The admin page. Read-only: every non-GET returns 405.
 │   │   ├── schemas/
 │   │   │   └── analyze.py      Pydantic models = the typed contract. THIS is the API spec.
@@ -541,6 +541,9 @@ ShadowGuard/
 │   │   │   ├── base.py         Finding, overlap resolution, severity ordering.
 │   │   │   ├── regex_detector.py     Stage 1a — 20+ rules, Luhn, context gates (D29).
 │   │   │   ├── entropy_detector.py   Stage 1b — Shannon entropy for unknown formats.
+│   │   │   ├── ocr.py         Stage 3 — images to text. A SOURCE, not a detector (D41).
+│   │   │   ├── pdf.py         Stage 3b — PDFs to text. Five channels, incl. the text
+│   │   │   │                  under a redaction box (D53).
 │   │   │   ├── semantic_detector.py  Stage 2 — Presidio + spaCy, entity allowlist (D28).
 │   │   │   └── catalog.py      entity type → severity, assembled FROM the detectors.
 │   │   ├── pipeline/

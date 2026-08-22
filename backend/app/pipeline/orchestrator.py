@@ -29,15 +29,17 @@ from dataclasses import dataclass
 
 from ..core import behaviour, redactor, risk
 from ..core.policy import DEFAULT_POLICY, RiskPolicy
-from ..detectors import entropy_detector, ocr, regex_detector, semantic_detector
+from ..detectors import entropy_detector, ocr, pdf, regex_detector, semantic_detector
 from ..detectors.base import Finding, highest_severity, resolve_overlaps
 from ..detectors.ocr import OcrResult
+from ..detectors.pdf import PdfResult
 from ..schemas.analyze import (
     Action,
     AnalyzeRequest,
     AnalyzeResponse,
     DetectedEntity,
     OcrInfo,
+    PdfInfo,
     RiskLevel,
 )
 
@@ -374,7 +376,110 @@ def analyze_image(
     return response, extracted
 
 
-def _describe(findings: list[Finding], action: Action, *, from_image: bool = False) -> str:
+def analyze_pdf(
+    pdf_bytes: bytes,
+    *,
+    policy: RiskPolicy = DEFAULT_POLICY,
+) -> tuple[AnalyzeResponse, PdfResult]:
+    """Read a PDF, then run the ordinary pipeline over what it says.
+
+    Stage 3b is a text SOURCE, exactly as Stage 3 is (D41), so the only
+    thing that differs from `analyze()` is where the text came from.
+
+    Deliberately a sibling of `analyze_image` rather than a branch
+    inside it. The two share a shape and almost nothing else: one loses
+    information to recognition and reports a confidence, the other
+    extracts exactly and reports which of five channels it came from.
+    Folding them together would mean a function whose every second line
+    asks which kind of file this is.
+
+    :param pdf_bytes: the raw upload
+    :raises ValueError: on an unreadable PDF
+    :raises RuntimeError: when the PDF backend is not installed
+    """
+    started = time.perf_counter()
+    request_id = uuid.uuid4().hex[:12]
+
+    extracted = pdf.extract_text(pdf_bytes)
+
+    # An empty extraction is NOT a pass, and this is the whole reason
+    # `has_text_layer` exists. A scanned document yields nothing here,
+    # and mapping nothing to `allow` would build the bypass in
+    # deliberately: photograph the secret, wrap it in a PDF, send it.
+    #
+    # The honest action is to allow — we have no evidence of anything —
+    # while telling the client plainly that nothing was read, so the
+    # modal can say "this looks like a scan and was not inspected"
+    # instead of showing silence as a clean bill of health. The same
+    # distinction Stage 3 draws with OCR confidence.
+    result = run_stages(extracted.text, policy=policy) if extracted.text.strip() else None
+
+    if result is None:
+        action, level, score = Action.ALLOW, RiskLevel.LOW, 0
+        findings, stages_run, reasons = [], ["pdf"], ()
+    else:
+        action, level, score = result.action, result.level, result.score
+        findings, reasons = result.findings, result.reasons
+        stages_run = ["pdf", *result.stages_run]
+
+        # ---- Redaction is not available for documents ------------
+        # Same reasoning as images, reached from the other direction.
+        # The risk engine sees a secret inside prose that survives its
+        # removal and offers `redact` — but the user is holding a PDF,
+        # and handing back an edited document would mean rewriting a
+        # content stream, re-laying out a page, and asking them to
+        # trust the result. Worse, a "redaction" applied to a PDF is
+        # the exact operation this module exists to catch people
+        # getting wrong.
+        #
+        # Downgrading everything to `warn` would make documents the
+        # weakest channel and reward routing secrets through them, so
+        # the score decides on the same threshold as everything else.
+        if action is Action.REDACT:
+            action = Action.BLOCK if score >= policy.block_threshold else Action.WARN
+
+    entities = [
+        DetectedEntity(
+            type=f.type, start=f.start, end=f.end, score=f.score, detector=f.detector
+        )
+        for f in findings
+    ]
+
+    latency_ms = (time.perf_counter() - started) * 1000
+
+    response = AnalyzeResponse(
+        request_id=request_id,
+        action=action,
+        level=level,
+        score=score,
+        entities=entities,
+        message=_describe(findings, action, from_pdf=True, extracted=extracted),
+        redacted_text=None,
+        pdf=PdfInfo(
+            characters=extracted.char_count,
+            pages=extracted.page_count,
+            pages_read=extracted.pages_read,
+            has_text_layer=extracted.has_text_layer,
+            truncated=extracted.truncated,
+            encrypted=extracted.encrypted,
+            sources=list(extracted.sources),
+        ),
+        latency_ms=round(latency_ms, 3),
+        stages_run=stages_run,
+        reasons=list(reasons),
+    )
+
+    return response, extracted
+
+
+def _describe(
+    findings: list[Finding],
+    action: Action,
+    *,
+    from_image: bool = False,
+    from_pdf: bool = False,
+    extracted: "PdfResult | None" = None,
+) -> str:
     """Write the sentence the user reads in the modal.
 
     Names the entity TYPES and never the matched values. A warning
@@ -387,9 +492,29 @@ def _describe(findings: list[Finding], action: Action, *, from_image: bool = Fal
     enough to make an actual decision, which is the difference between
     a control people respect and one they learn to dismiss.
     """
-    where = " in this image" if from_image else ""
+    where = " in this image" if from_image else " in this document" if from_pdf else ""
 
     if not findings:
+        # ---- The sentence that must not lie -----------------------
+        # "Nothing was found" and "there was nothing to look at" are
+        # different statements, and collapsing them is how a scanned
+        # payslip gets sent under a reassuring message. A document with
+        # no text layer is reported as UNREAD, not as clean.
+        if from_pdf and extracted is not None and not extracted.has_text_layer:
+            if extracted.encrypted:
+                return (
+                    "This PDF is password-protected, so ShadowGuard could not "
+                    "read it. It has NOT been checked for sensitive content."
+                )
+            return (
+                "This PDF has no text layer — it is most likely a scan or a "
+                "photograph. ShadowGuard could not read it, so it has NOT been "
+                "checked for sensitive content."
+            )
+
+        if from_pdf:
+            return "No sensitive content was found in this document."
+
         return (
             "No sensitive text was found in this image."
             if from_image

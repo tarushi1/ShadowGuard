@@ -107,12 +107,24 @@ class DecisionEvent(Base):
     platform: Mapped[str] = mapped_column(String(32), index=True)
 
     source: Mapped[str] = mapped_column(String(8), default="text", index=True)
-    """`text` or `image`.
+    """`text`, `image` or `pdf`.
 
     Indexed because the question "is the image path weaker than the
     text path?" is one the report has to answer with data, and B11 says
-    the answer is yes. Without this column the two are indistinguishable
-    after the fact.
+    the answer is yes. Without this column the three are
+    indistinguishable after the fact.
+
+    `pdf` is expected to be the STRONGEST of the three, which is the
+    interesting part: a born-digital document has a real text layer, so
+    extraction is exact where OCR is lossy. The same key is caught in a
+    PDF and missed in a screenshot of that PDF. Stored per-decision so
+    that claim can be checked against real traffic rather than argued.
+
+    Eight characters is enough for every value here and for anything
+    plausible later (`audio`, `docx`). Worth noting only because
+    widening it later needs a migration, and `create_all` cannot ALTER
+    an existing table — it would silently leave the old schema in
+    place.
     """
 
     ocr_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)

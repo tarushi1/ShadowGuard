@@ -33,7 +33,7 @@ function setup({ allow = true } = {}) {
   const { window, SG } = context;
 
   const seen = [];
-  const interceptor = new SG.ImageInterceptor(
+  const interceptor = new SG.AttachmentInterceptor(
     SG.resolveAdapter("chatgpt.com"),
     async (file, info) => {
       seen.push({ file, ...info });
