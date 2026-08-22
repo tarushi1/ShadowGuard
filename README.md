@@ -14,7 +14,7 @@ It computes a risk score and decides whether to **allow**, **warn**, **redact**,
 
 > Read `README.md` and `docs/decisions.md` in this repo, in that order, before doing anything else.
 > `README.md` is the session-recovery document: it has current state, the exact next task, and the
-> mentoring contract I work under. `docs/decisions.md` is the decision log (D1–D51) — every choice
+> mentoring contract I work under. `docs/decisions.md` is the decision log (D1–D52) — every choice
 > and its reasoning, so you don't re-litigate settled decisions or contradict them. Then tell me
 > what you understand the next task to be, and wait for me to confirm before writing code.
 
@@ -23,7 +23,7 @@ It computes a risk score and decides whether to **allow**, **warn**, **redact**,
 | File | What it gives a fresh session |
 |---|---|
 | **`README.md`** | State, next task, roadmap, how to run everything, measured results, the mentoring contract |
-| **`docs/decisions.md`** | **D1–D51** — why every choice was made, and what was rejected. This is what stops a new session undoing settled work |
+| **`docs/decisions.md`** | **D1–D52** — why every choice was made, and what was rejected. This is what stops a new session undoing settled work |
 
 If it needs more, point it at the [knowledge base index](docs/README.md) — but don't paste those
 up front. A session that reads everything before starting spends its context on history instead of
@@ -113,8 +113,8 @@ like code, and only executable checks notice — which is why a few agreements a
 | **Git branch** | `main` (86 commits, working tree clean). **Nothing pushed yet** — GitHub push protection rejects the push because `evaluation/data/corpus.jsonl` contains vendor-shaped API keys. They are synthetic (several are character rotations of each other), so this is a false positive of exactly the kind this project measures. Unblock each via the links in the push output, or turn push protection off in repo settings, then `git push -u origin main`. |
 | **Current stage** | Stages 0–4 live: interception, regex, entropy, semantic, OCR, risk engine, redaction, persistence — for text **and** images, on ChatGPT and (unverified) Gemini. |
 | **Completed** | **Weeks 1–7 complete.** Gemini adapter written but **not verified against the live site**. |
-| **Next task** | **Week 8 — hardening, report, diagrams, demo.** Also open: close bypass B1, live-verify Gemini, improve OCR retention for `GOOGLE_API_KEY` and `JWT` (both 0%) |
-| **Tests** | **316 Python** (`pytest -q`) · **67 JavaScript** (`npm test`) · extension **v0.11.2** |
+| **Next task** | **Week 8 — hardening, report, diagrams, demo.** Also open: live-verify the Gemini adapter, improve OCR retention for `GOOGLE_API_KEY` and `JWT` (both 0%, bypass B11) |
+| **Tests** | **316 Python** (`pytest -q`) · **73 JavaScript** (`npm test`) · extension **v0.12.0** |
 | **Measured** | 230-sample corpus — text: recall **98.3%**, FPR **0%**, F1 **99.1%** (regex alone **75.7%**) · images: OCR retention **93.9%**, OCR-induced FPR **2.0%** |
 | **Deadline** | ~2026-09-20 (8 weeks from 2026-07-26) |
 | **Weeks elapsed** | **3.3 of 8**, with 6 weeks of plan delivered — well ahead |

@@ -26,7 +26,7 @@ Tracked deliberately. Each is either fixed, scheduled, or accepted with reasonin
 
 | # | Bypass | Status |
 |---|---|---|
-| B1 | **Edit-after-analysis.** The composer stays editable while a decision is pending, so a user can trip the warning with benign text, paste a secret while the modal is open, then click Proceed — sending text that was never inspected. | **Still open.** `approve()` detects the change and warns in the console, which the user never sees. Week 5 was supposed to turn this into re-analysis and did not — recorded here rather than left as an expired promise |
+| B1 | **Edit-after-analysis.** The composer stays editable while a decision is pending, so a user can trip the warning with benign text, paste a secret while the modal is open, then click Proceed — sending text that was never inspected. | **Closed** — every replay path re-reads the composer and analyses the new text rather than sending it ([D52](decisions.md#d52--the-bytes-sent-are-the-bytes-inspected)). Bounded at three re-checks, failing closed. `approve()` additionally refuses outright |
 | B2 | **Fail-open.** Killing the backend disables inspection. | **Accepted** with a visible notice — see [D12](decisions.md#d12--fail-open-but-visibly) |
 | B3 | **`__sg` console handle.** `__sg.disable()` is reachable from DevTools. | Dev-only; would not ship in a real build |
 | B4 | **Off-path usage.** The ChatGPT API, a different browser, a phone. | Inherent to the approach. State it plainly. |

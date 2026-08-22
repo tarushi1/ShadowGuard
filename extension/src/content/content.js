@@ -42,6 +42,24 @@
   const VERIFY_DELAY_MS = 500;
 
   /**
+   * How many times one send may be re-analysed before we refuse it.
+   *
+   * The composer stays editable while a decision is outstanding, so
+   * the text can change between the moment it was inspected and the
+   * moment it is replayed. Every replay path therefore re-reads the
+   * composer and, if it differs, analyses the NEW text instead of
+   * sending it (bypass B1).
+   *
+   * That is a loop: analyse, ask, edit, analyse again. A person will
+   * stop after one or two rounds. A hostile page rewriting the
+   * composer on every dialog close would not, and each round costs an
+   * HTTP request — so the loop is bounded and the bound fails CLOSED.
+   * Three is chosen to be past any plausible human sequence (fix a
+   * typo, remove the flagged value) while still terminating quickly.
+   */
+  const MAX_RECHECKS = 3;
+
+  /**
    * The send we cancelled and are holding, or null.
    * Declared here so the interceptor callback and the approve/discard
    * helpers below all close over the same binding.
@@ -146,7 +164,7 @@
    * @param {string} text
    * @param {{trigger: string}} context
    */
-  async function handleIntercept(text, context) {
+  async function handleIntercept(text, context, depth = 0) {
     // ---- Guard: a decision is already outstanding ---------------
     // The listener stays active while the modal is up, so the user
     // can press Enter again behind the dialog. showModal() throws a
@@ -201,8 +219,16 @@
         allowProceed: SG.CONFIG.FAIL_MODE === "open",
       });
 
-      if (decision === "proceed") approve();
-      else discard();
+      if (decision !== "proceed") {
+        discard();
+        return;
+      }
+
+      // Checked even here, where nothing was analysed. The user is
+      // approving an UNINSPECTED send, but they are approving THIS
+      // text — replaying something they edited afterwards would still
+      // be sending a message they never agreed to.
+      if (await replayIsStillValid(depth)) approve();
       return;
     }
 
@@ -219,7 +245,11 @@
     // backend's latency budget is a product requirement and not just a
     // number in the report.
     if (verdict.action === SG.ACTION.ALLOW) {
-      approve({ silent: true });
+      // The window here is small — one HTTP round trip — but it is not
+      // zero, and it is the one window the user is given no dialog to
+      // notice. A verdict of `allow` for text that is no longer in the
+      // box is not a verdict about anything.
+      if (await replayIsStillValid(depth)) approve({ silent: true });
       return;
     }
 
@@ -263,6 +293,14 @@
       discard();
       return;
     }
+
+    // Both branches are guarded, and the redaction branch is the one
+    // that would have been worst. `sendRedacted` OVERWRITES the
+    // composer with the server's replacement — a redaction computed
+    // from the text as it was when analysed. Had the user edited in
+    // the meantime, that write would have destroyed their edit and
+    // sent a rewrite of a message that no longer existed.
+    if (!(await replayIsStillValid(depth))) return;
 
     // The modal previews a TRUNCATED redaction for readability; what
     // gets sent is the full string from the server. Sending the
@@ -454,6 +492,96 @@
   // Acting on the decision
   // ---------------------------------------------------------------
   /**
+   * May the held send be replayed, or has the text moved on?
+   *
+   * This closes bypass **B1**, and the bug it closes is a
+   * time-of-check-to-time-of-use gap, not a detection failure. The
+   * text is inspected at one moment and sent at another, and the
+   * composer is editable throughout the interval. So:
+   *
+   *   1. trip a warning with something harmless
+   *   2. paste a secret while the dialog is open
+   *   3. click Proceed
+   *
+   * and the secret is sent under an approval the user gave for
+   * different text. Nothing in the pipeline ever saw it. No detector
+   * improvement can close this, because detection was never the thing
+   * that failed.
+   *
+   * What was here before was a `console.warn`. That is worth naming
+   * precisely rather than glossing: the check was already written and
+   * already correct, and it reported the violation to a place no user
+   * looks. A control whose output nobody reads is not a mitigation, it
+   * is a record of a decision not taken.
+   *
+   * The fix is to treat edited text as what it is — a new message
+   * nobody has inspected — and analyse it. Not to send it with a
+   * warning, and not to refuse outright either, because the common
+   * case is innocent: the dialog says "there is a card number in
+   * here", the user deletes it while the dialog is open and clicks
+   * Proceed. Re-analysis handles that exactly right — the new text is
+   * clean, it comes back `allow`, and it sends with no further
+   * ceremony. Refusing would have made the correct action feel broken.
+   *
+   * @param {number} depth how many times this send has been re-analysed
+   * @returns {Promise<boolean>} true if the caller may replay
+   */
+  async function replayIsStillValid(depth) {
+    // No pending send or no composer: not this function's problem.
+    // `approve()` reports both, and duplicating the message here would
+    // produce two warnings for one fault.
+    if (!pending || !composer) return true;
+
+    const current = adapter.readText(composer);
+    if (current === pending.text) return true;
+
+    console.warn(
+      `${TAG} composer changed after inspection ` +
+      `(${pending.text.length} → ${current.length} chars) — re-analysing, not sending.`
+    );
+
+    // ---- The bound, and why it fails closed --------------------
+    // Re-analysis is a loop with a human in it, and a hostile page is
+    // not obliged to be human. Rewriting the composer on every dialog
+    // close would spin this forever, one HTTP request per turn.
+    //
+    // On exhaustion we do NOT send. The alternative — give up
+    // re-checking and replay whatever is there — would turn the bound
+    // into the bypass, which is a familiar way for a rate limit to
+    // become the hole it was protecting.
+    if (depth >= MAX_RECHECKS) {
+      console.error(`${TAG} text changed ${depth} times — refusing to send.`);
+      discard();
+
+      await modal.show({
+        variant: "changed",
+        message:
+          "The message kept changing while ShadowGuard was checking it, so " +
+          "nothing has been sent. Your text is still in the box — send it " +
+          "again when you have finished editing.",
+        allowProceed: false,
+      });
+
+      return false;
+    }
+
+    // Re-enter the ordinary path with the text that is actually there.
+    // Clearing `pending` first matters: handleIntercept sets it, and
+    // leaving the old value in place would let the guard at the top of
+    // this function compare against a message that no longer exists.
+    const trigger = pending.trigger;
+    pending = null;
+
+    await handleIntercept(current, { trigger }, depth + 1);
+
+    // False regardless of what the recursive call decided. That call
+    // owns the outcome now — it has already sent, or shown its own
+    // dialog, or discarded. Returning true here would replay a second
+    // time on top of it.
+    return false;
+  }
+
+  /**
    * Send the held message.
    *
    * @param {{silent?: boolean}} [options]
@@ -470,17 +598,27 @@
       return false;
     }
 
-    // The composer stays editable while a decision is outstanding, so
-    // the user can change the text after it was analysed and before
-    // they approve. Sending the edited version would ship text that
-    // never passed inspection. This is bypass B1; it is a warning
-    // today and becomes re-analysis in a later task.
+    // Defence in depth, and the last line of it.
+    //
+    // `replayIsStillValid()` has already run at every call site, so in
+    // normal operation this never fires. It stays because approve() is
+    // reachable from the `__sg` debug handle and from any call site
+    // added later, and the invariant it protects is the one the whole
+    // interception exists to hold: THE BYTES SENT ARE THE BYTES THAT
+    // WERE INSPECTED. A future caller that forgets the guard should
+    // get a refused send, not a silent bypass.
+    //
+    // Refusing rather than warning is the change that closes B1. The
+    // previous version logged and sent anyway, which made the console
+    // the only witness to a policy violation.
     const current = adapter.readText(composer);
     if (current !== pending.text) {
-      console.warn(
-        `${TAG} composer text changed since it was inspected ` +
+      console.error(
+        `${TAG} refusing to replay — composer text changed since inspection ` +
         `(${pending.text.length} → ${current.length} chars).`
       );
+      pending = null;
+      return false;
     }
 
     const result = adapter.send(composer);
@@ -640,6 +778,14 @@
     get pending() {
       return pending;
     },
+
+    /**
+     * The dialog instance. Exposed so a test can drive the paths that
+     * only exist behind it — B1's re-analysis is reached by clicking
+     * Proceed, and a suite with no handle on the modal cannot get
+     * there at all.
+     */
+    modal,
 
     /** Modal "Proceed" — replay the held send. */
     approve,

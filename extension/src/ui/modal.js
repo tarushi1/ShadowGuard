@@ -415,15 +415,26 @@ globalThis.SG.WarningModal = class WarningModal {
     const offline = variant === "offline";
     const redact = variant === "redact";
 
-    $("#sg-banner").className = `banner level-${offline ? "offline" : level}`;
+    // `changed` is the refusal shown when the composer kept moving
+    // while it was being checked. It shares the offline LAYOUT because
+    // it shares offline's meaning: no verdict was reached, so there is
+    // no score and no entity list to show. It does not share the
+    // title, because "ShadowGuard is offline" would be a lie — the
+    // service answered fine; it is the message that would not hold
+    // still.
+    const noVerdict = offline || variant === "changed";
+
+    $("#sg-banner").className = `banner level-${noVerdict ? "offline" : level}`;
 
     $("#sg-title").textContent = offline
       ? "ShadowGuard is offline"
-      : redact
-        ? "Sensitive content can be removed"
-        : level === "critical"
-          ? "Blocked — critical content"
-          : "Sensitive content detected";
+      : variant === "changed"
+        ? "Nothing was sent"
+        : redact
+          ? "Sensitive content can be removed"
+          : level === "critical"
+            ? "Blocked — critical content"
+            : "Sensitive content detected";
 
     // textContent, not innerHTML. See the note in #buildDialog().
     $("#sg-msg").textContent = message;
@@ -431,9 +442,9 @@ globalThis.SG.WarningModal = class WarningModal {
     // There is no score and there are no entities when nothing ran.
     // Showing "0 / 100 (low)" would be an outright lie — it reads as
     // "we checked and it is fine", which is the opposite of the truth.
-    $("#sg-detail").hidden = offline;
+    $("#sg-detail").hidden = noVerdict;
 
-    if (!offline) {
+    if (!noVerdict) {
       $("#sg-score").textContent = `${score} / 100 (${level})`;
 
       const list = $("#sg-entities");

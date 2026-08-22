@@ -1438,3 +1438,66 @@ A corpus scores the detectors you built against the samples **you thought to wri
 thought to write a sample with an Aadhaar number and a phone number in the same sentence. Rerunning
 the corpus after the fix produced numbers that were bit-for-bit identical — it could neither find
 this defect nor confirm the repair.
+
+---
+
+## D52 — The bytes sent are the bytes inspected
+
+**Context.** Interception splits a send into two moments: the text is analysed at one, and replayed
+at the other. The composer stays editable throughout the gap. So the whole sequence
+
+1. trip a warning with something harmless
+2. paste a secret while the dialog is open
+3. click Proceed
+
+sends the secret under an approval the user gave for different text. This is [B1](security.md), and
+it is worth being precise about what kind of failure it is: **nothing in the detection pipeline was
+wrong.** No rule missed anything, because no rule was ever shown the message. Improving detection
+cannot close it.
+
+**The state it was found in matters more than the bug.** The check already existed. `approve()`
+compared the current composer text against what had been analysed, found the mismatch, and called
+`console.warn` — then sent the message anyway. So the violation was detected, correctly, and
+reported to a place no user will ever look.
+
+That is a failure mode worth naming, because it looks like diligence in a code review: there is a
+check, it has a comment, it names the bypass. **A control whose output nobody reads is not a
+mitigation. It is a record of a decision not taken.**
+
+**Chosen:** every replay path re-reads the composer, and if the text differs it **analyses the new
+text** instead of sending it.
+
+| Rejected | Why |
+|---|---|
+| Warn and send (the old behaviour) | See above |
+| Refuse the send outright | Safe, but wrong for the **common** case. The dialog says "there is a card number in here", the user deletes it while the dialog is open and clicks Proceed. That is the tool working. A refusal makes the correct action feel broken, and people route around tools that punish them for complying |
+| Disable the composer while a decision is pending | Closes it, and closes the good case with it. Also a guest content script fighting the host page for control of its own input, which B5 says we lose |
+
+Re-analysis gets the good case right by accident of being correct: the edited text comes back
+`allow` and sends with no further ceremony.
+
+**Three replay paths, all guarded, and the third was the dangerous one.**
+
+| Path | Window | Why it needed the guard |
+|---|---|---|
+| `allow` | one HTTP round trip | Short, and the only window with **no dialog** for the user to notice |
+| warn → Proceed | as long as the dialog is up | The attack above |
+| redact → Send redacted | as long as the dialog is up | **Worst.** `sendRedacted()` overwrites the composer with a redaction computed from the *old* text. Unguarded, approving a redaction after an edit would have destroyed the user's edit and sent a rewrite of a message that no longer existed |
+
+**Bounded at three, failing closed.** Re-analysis is a loop with a human in it, and a hostile page is
+not obliged to be human: rewriting the composer on every dialog close would spin it forever at one
+HTTP request per turn. On exhaustion the send is **refused**, not released. Releasing would make the
+rate limit into the bypass it was protecting against — a familiar way for a defence to invert.
+
+**The refusal is a dialog, not a log line.** Reusing the `offline` layout, because it shares the
+meaning: no verdict was reached, so there is no score and no entity list to show. It does not reuse
+the title, because "ShadowGuard is offline" would be false — the service answered fine; the message
+would not hold still.
+
+**`approve()` also refuses on its own.** Redundant in normal operation, since the guard runs at
+every call site. It stays because `approve()` is reachable from the `__sg` debug handle and from any
+call site added later, and the invariant is the one the entire interception exists to hold. A future
+caller that forgets the guard should get a refused send rather than a silent bypass.
+
+**Verified by re-introducing the bug.** Restoring the warn-and-send behaviour fails four of the six
+new tests. A regression test that does not fail against the original defect is decoration.
