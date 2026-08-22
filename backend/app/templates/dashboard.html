@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ShadowGuard AI — decisions</title>
+<style>
+  /* Colour tokens. Every colour is a variable and the dark theme
+     overrides ONLY the variables — the same discipline the extension
+     modal needed after a media query placed above the component rules
+     silently lost to them (D-modal). */
+  :root {
+    color-scheme: light;
+    --page:        #f9f9f7;
+    --surface:     #fcfcfb;
+    --ink:         #0b0b0b;
+    --ink-2:       #52514e;
+    --muted:       #898781;
+    --grid:        #e1e0d9;
+    --baseline:    #c3c2b7;
+    --border:      rgba(11,11,11,0.10);
+    --series:      #2a78d6;
+
+    /* Status palette — fixed, never themed. `warning` and `serious`
+       measure ΔE 13.6 apart, below the 15 normal-vision floor, so
+       every bar carries a visible label and glyph. Colour never
+       carries the meaning alone here. */
+    --good:        #0ca30c;
+    --warning:     #fab219;
+    --serious:     #ec835a;
+    --critical:    #d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --page:     #0d0d0d;
+      --surface:  #1a1a19;
+      --ink:      #ffffff;
+      --ink-2:    #c3c2b7;
+      --muted:    #898781;
+      --grid:     #2c2c2a;
+      --baseline: #383835;
+      --border:   rgba(255,255,255,0.10);
+      --series:   #3987e5;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #fff; --ink-2: #c3c2b7;
+    --grid: #2c2c2a; --baseline: #383835;
+    --border: rgba(255,255,255,0.10); --series: #3987e5;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 24px 64px;
+    background: var(--page); color: var(--ink);
+    font: 14px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+
+  header { margin-bottom: 28px; }
+  h1 { font-size: 20px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .sub { color: var(--ink-2); font-size: 13px; margin: 0; }
+
+  h2 {
+    font-size: 13px; font-weight: 600; letter-spacing: 0.04em;
+    text-transform: uppercase; color: var(--ink-2);
+    margin: 0 0 14px;
+  }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px; margin-bottom: 20px;
+  }
+  .grid { display: grid; gap: 20px; grid-template-columns: 1fr 1fr; }
+  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+
+  /* ---- Stat tiles: a number IS the right form for a headline ---- */
+  .tiles { display: grid; gap: 14px; grid-template-columns: repeat(4, 1fr); margin-bottom: 20px; }
+  @media (max-width: 760px) { .tiles { grid-template-columns: repeat(2, 1fr); } }
+  .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; }
+  .tile .v { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; }
+  .tile .k { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  /* ---- Bars ---- */
+  .bar-row { display: grid; grid-template-columns: 132px 1fr 56px; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .bar-row:last-child { margin-bottom: 0; }
+  .bar-label { font-size: 13px; color: var(--ink-2); display: flex; align-items: center; gap: 6px; }
+  .glyph { width: 9px; height: 9px; border-radius: 2px; flex: none; }
+  .track { background: var(--grid); border-radius: 4px; height: 12px; overflow: hidden; }
+  /* 4px rounded data-end, anchored to the baseline at the left. */
+  .fill { height: 100%; border-radius: 4px; min-width: 3px; }
+  .num { text-align: right; font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
+  /* ---- Histogram ---- */
+  .hist { display: flex; align-items: flex-end; gap: 2px; height: 132px; }
+  .hcol { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; height: 100%; }
+  .hbar { background: var(--series); border-radius: 4px 4px 0 0; min-height: 2px; }
+  .haxis { display: flex; gap: 2px; margin-top: 6px; }
+  .haxis span { flex: 1; text-align: center; font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; font-weight: 600; color: var(--muted); font-size: 11px;
+       text-transform: uppercase; letter-spacing: 0.04em; padding: 0 10px 8px 0; }
+  td { padding: 7px 10px 7px 0; border-top: 1px solid var(--grid); color: var(--ink-2);
+       font-variant-numeric: tabular-nums; }
+  td.t { color: var(--ink); font-variant-numeric: normal; }
+  .pill { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; }
+
+  .empty { color: var(--muted); font-size: 13px; padding: 8px 0; }
+  .note { color: var(--muted); font-size: 12px; margin-top: 22px; line-height: 1.6; }
+  .note strong { color: var(--ink-2); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>ShadowGuard AI</h1>
+    <p class="sub">Every decision the pipeline has made. No message content is stored, so none is shown.</p>
+  </header>
+
+  {% macro status_colour(action) -%}
+    {%- if action == 'allow' -%}var(--good)
+    {%- elif action == 'warn' -%}var(--warning)
+    {%- elif action == 'redact' -%}var(--serious)
+    {%- else -%}var(--critical){%- endif -%}
+  {%- endmacro %}
+
+  {% macro status_glyph(action) -%}
+    {%- if action == 'allow' -%}✓{% elif action == 'warn' %}!{% elif action == 'redact' %}✎{% else %}✕{% endif -%}
+  {%- endmacro %}
+
+  <div class="tiles">
+    <div class="tile"><div class="v">{{ summary.total }}</div><div class="k">decisions</div></div>
+    <div class="tile"><div class="v">{{ '%.1f'|format(summary.intervention_rate * 100) }}%</div><div class="k">intervened</div></div>
+    <div class="tile"><div class="v">{{ summary.mean_latency_ms }} ms</div><div class="k">mean latency</div></div>
+    <div class="tile"><div class="v">{{ summary.images }}</div><div class="k">images inspected</div></div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Outcome</h2>
+      {% if actions %}
+        {% for action, count in actions %}
+        <div class="bar-row">
+          <span class="bar-label">
+            <span class="glyph" style="background:{{ status_colour(action) }}"></span>
+            {{ status_glyph(action) }} {{ action }}
+          </span>
+          <div class="track"><div class="fill"
+               style="width:{{ (count / max_action * 100)|round(1) }}%;background:{{ status_colour(action) }}"
+               title="{{ action }}: {{ count }}"></div></div>
+          <span class="num">{{ count }}</span>
+        </div>
+        {% endfor %}
+      {% else %}<p class="empty">No decisions recorded yet.</p>{% endif %}
+    </div>
+
+    <div class="card">
+      <h2>Risk score distribution</h2>
+      {% if summary.total %}
+        <div class="hist">
+          {% for floor, count in histogram %}
+          <div class="hcol" title="{{ floor }}–{{ floor + 9 }}: {{ count }}">
+            <div class="hbar" style="height:{{ (count / max_bucket * 100)|round(1) if max_bucket else 0 }}%"></div>
+          </div>
+          {% endfor %}
+        </div>
+        <div class="haxis">{% for floor, _ in histogram %}<span>{{ floor }}</span>{% endfor %}</div>
+      {% else %}<p class="empty">No decisions recorded yet.</p>{% endif %}
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Which stage found it</h2>
+      {% if detectors %}
+        {% for name, count in detectors %}
+        <div class="bar-row">
+          <span class="bar-label">{{ name }}</span>
+          <div class="track"><div class="fill"
+               style="width:{{ (count / max_detector * 100)|round(1) }}%;background:var(--series)"
+               title="{{ name }}: {{ count }}"></div></div>
+          <span class="num">{{ count }}</span>
+        </div>
+        {% endfor %}
+      {% else %}<p class="empty">Nothing detected yet.</p>{% endif %}
+    </div>
+
+    <div class="card">
+      <h2>Entity types seen</h2>
+      {% if entities %}
+        {% for name, count in entities %}
+        <div class="bar-row">
+          <span class="bar-label">{{ name.replace('_', ' ').lower() }}</span>
+          <div class="track"><div class="fill"
+               style="width:{{ (count / max_entity * 100)|round(1) }}%;background:var(--series)"
+               title="{{ name }}: {{ count }}"></div></div>
+          <span class="num">{{ count }}</span>
+        </div>
+        {% endfor %}
+      {% else %}<p class="empty">Nothing detected yet.</p>{% endif %}
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Recent decisions</h2>
+    {% if recent %}
+    <table>
+      <thead><tr>
+        <th>Time</th><th>User</th><th>Source</th><th>Outcome</th>
+        <th>Score</th><th>Chars</th><th>Found</th><th>Latency</th>
+      </tr></thead>
+      <tbody>
+        {% for e in recent %}
+        <tr>
+          <td>{{ e.created_at.strftime('%d %b %H:%M') }}</td>
+          {# Truncated, with the whole value on hover. A pseudonymous
+             id is 36 characters of which the first few identify it
+             uniquely in any realistic install, and at full width it
+             pushed the columns that carry meaning off the right of the
+             table. #}
+          <td class="t"><span title="{{ e.user_id }}">{{ e.user_id[:8] }}…</span></td>
+          <td>{{ e.source }}</td>
+          {# The GLYPH wears the status colour; the word wears ink.
+             `warning` at #fab219 on a light surface fails the 3:1
+             contrast check, and a word is the one thing on this page
+             that must stay legible. The colour still identifies the
+             outcome, it just no longer has to be readable to do it. #}
+          <td><span class="pill"><span style="color:{{ status_colour(e.action) }}">{{ status_glyph(e.action) }}</span> {{ e.action }}</span></td>
+          <td>{{ e.score }}</td>
+          <td>{{ e.char_count }}</td>
+          {# Underscores out, to match the humanised labels in the
+             charts above. Same data, one spelling. #}
+          <td class="t">{{ e.entities | map(attribute='entity_type') | unique | map('lower') | map('replace', '_', ' ') | join(', ') or '—' }}</td>
+          <td>{{ '%.1f'|format(e.latency_ms) }} ms</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<p class="empty">No decisions recorded yet. Send a message through the extension.</p>{% endif %}
+  </div>
+
+  <p class="note">
+    <strong>Every column here is metadata.</strong> The decision store has no column that can hold a
+    prompt, so this page cannot display one — lengths, entity types, scores and timings only.
+    Outcome is shown with a glyph and a word as well as a colour, because two of the four status
+    colours sit below the normal-vision separation floor and colour must never carry the meaning
+    alone.
+  </p>
+
+</div>
+</body>
+</html>

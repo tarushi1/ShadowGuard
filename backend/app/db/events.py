@@ -163,3 +163,103 @@ def purge_older_than(days: int) -> int:
         )
 
         return result.rowcount or 0
+
+
+# ---------------------------------------------------------------
+# Dashboard aggregates
+# ---------------------------------------------------------------
+# Written against the indexes declared in models/event.py rather than
+# the other way round. An index with no reader is a write cost nobody
+# pays for; a query with no index is a table scan nobody notices until
+# the table is large.
+
+
+def summary() -> dict:
+    """Headline counts for the dashboard's top row."""
+    with session_scope() as session:
+        total = session.scalar(select(func.count()).select_from(DecisionEvent)) or 0
+        stopped = (
+            session.scalar(
+                select(func.count())
+                .select_from(DecisionEvent)
+                .where(DecisionEvent.action != "allow")
+            )
+            or 0
+        )
+        users = session.scalar(select(func.count(func.distinct(DecisionEvent.user_id)))) or 0
+        images = (
+            session.scalar(
+                select(func.count())
+                .select_from(DecisionEvent)
+                .where(DecisionEvent.source == "image")
+            )
+            or 0
+        )
+        latency = session.scalar(select(func.avg(DecisionEvent.latency_ms))) or 0.0
+
+    return {
+        "total": total,
+        "stopped": stopped,
+        "allowed": total - stopped,
+        # The proportion that matters for adoption. A tool stopping a
+        # third of everything is one people switch off.
+        "intervention_rate": (stopped / total) if total else 0.0,
+        "users": users,
+        "images": images,
+        "mean_latency_ms": round(latency, 2),
+    }
+
+
+def source_counts() -> dict[str, int]:
+    """Text versus image.
+
+    B11 says the image path is measurably weaker. This is the column
+    that lets the claim be checked against real traffic rather than
+    against rendered test data.
+    """
+    with session_scope() as session:
+        return {
+            source: count
+            for source, count in session.execute(
+                select(DecisionEvent.source, func.count()).group_by(DecisionEvent.source)
+            )
+        }
+
+
+def detector_counts() -> dict[str, int]:
+    """Which STAGE is actually earning its latency.
+
+    Entity counts say what was found; this says which technique found
+    it. Over time it answers the question the ablation can only answer
+    on a corpus: does the semantic stage justify 200x the cost of
+    regex on real traffic?
+    """
+    with session_scope() as session:
+        return {
+            detector: count
+            for detector, count in session.execute(
+                select(DecisionEntity.detector, func.count())
+                .group_by(DecisionEntity.detector)
+                .order_by(func.count().desc())
+            )
+        }
+
+
+def score_histogram(buckets: int = 10) -> list[tuple[int, int]]:
+    """Distribution of risk scores, in ten-point buckets.
+
+    The shape matters more than any average. A healthy distribution is
+    heavily weighted at zero — most messages are ordinary — with a thin
+    tail. A flat distribution would mean the scorer is not
+    discriminating.
+    """
+    with session_scope() as session:
+        scores = list(session.scalars(select(DecisionEvent.score)))
+
+    width = 100 // buckets
+    counts = [0] * buckets
+
+    for score in scores:
+        counts[min(score // width, buckets - 1)] += 1
+
+    return [(index * width, count) for index, count in enumerate(counts)]

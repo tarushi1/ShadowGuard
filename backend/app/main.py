@@ -41,6 +41,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .api.routes import analyze as analyze_routes
+from .api.routes import dashboard as dashboard_routes
 from .db import session
 from .detectors import semantic_detector
 
@@ -178,3 +179,4 @@ app.add_middleware(
 # carries its own /api/v1 prefix, so the version segment lives in one
 # place and cannot drift between endpoints.
 app.include_router(analyze_routes.router)
+app.include_router(dashboard_routes.router)

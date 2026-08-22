@@ -1348,3 +1348,86 @@ privacy tool ought to be built from as little as possible.*
 | Store uploaded images, or only extracted OCR text? | Week 6 — a real privacy question |
 | Local-only backend vs deployed | Week 8 |
 | Whether `redact` edits in place or requires re-confirmation | Week 5 |
+
+---
+
+## D50 — The dashboard is server-rendered by the backend that already exists
+
+**Context.** Week 7 needed an administrative view: what the pipeline has been deciding, how often it
+intervenes, which detectors earn their latency. The reflexive answer is a React single-page app
+talking to a JSON API.
+
+**Chosen:** a **single server-rendered Jinja2 page** mounted on the FastAPI app, with charts drawn
+in plain HTML and CSS.
+
+| Rejected | Why |
+|---|---|
+| React SPA | A second process, a build step, and a `node_modules` tree, in exchange for interactivity this page does not have. A demo that needs two servers started in the right order is a demo that breaks in front of an examiner |
+| Flask + separate API | The same second process, plus a second web framework in one repository |
+| Chart.js / D3 from a CDN | **This is the one that actually matters** — see below |
+
+**No chart library, and the reason is not simplicity.** Every chart on the page is a `div` with a
+percentage width. That is enough for ranked bars and a histogram, and it costs nothing — but the
+real argument is that pulling a library from a CDN would make the ShadowGuard console issue an
+outbound request on every page load. A data-loss-prevention tool whose own dashboard phones out to a
+third party has undermined the property the entire project rests on, and the failure would be
+**invisible**: the page looks identical whether or not the request succeeds. A test asserts that the
+rendered HTML contains no non-loopback URL.
+
+**Read-only, deliberately.** No control on this page changes policy. `core/policy.py` is meant to be
+the single place policy lives, and an "adjust threshold" button would quietly make it the second.
+Every non-GET method returns 405, and a test pins that.
+
+**It cannot display a prompt, and that is inherited rather than exercised.** The schema has no
+column that can hold message text ([D11](#d11--logs-record-the-decision-never-the-content)),
+so restraint is not required of the template — there is nothing to be restrained about. The test
+that guards this is the same test that opens `test_persistence.py`, asked one layer further out:
+send a real secret through the real endpoint, fetch the real page, search the bytes the browser
+would receive. It checks the innocuous words around the secret too, because *"the text near the
+finding, for context"* is the plausible, well-intentioned version of this leak.
+
+**Colour.** Four status colours for outcomes, one hue for ranked bars. The status palette **fails**
+a categorical validation run — `warning` and `serious` sit 13.6 ΔE apart, below the 15 normal-vision
+floor — which is why every outcome ships a **glyph and a word** as well as a colour, and why the
+outcome column colours only the glyph: `#fab219` on a light surface is below 3:1 contrast, and a
+word is the one thing on the page that must stay legible.
+
+---
+
+## D51 — A shape, not a vocabulary: Aadhaar read as a telephone, twice
+
+**Context.** The phone rule's "loose triplet" branch matched `\d{3,4}` in three groups. Twelve
+digits written as three groups of four is the printed form of an **Aadhaar number**, so the rule
+claimed one — at 0.8 confidence against Aadhaar's 0.7, winning the overlap and demoting a
+`critical` national identifier to a `low` contact detail.
+
+**This is the second time this exact collision occurred.** The first was fixed by deleting the word
+`call` from the phone context vocabulary ([D47](#d47--phone-numbers-and-the-limit-of-enumerating-categories)).
+It came back through the word `phone` appearing later in the same sentence.
+
+**What that says about the first fix.** Removing a word treats the *trigger*; the claim itself was
+false regardless of which word was nearby. `2345 6789 0123` is not a telephone number in any
+numbering plan on earth — a subscriber number that long carries a country code, which a different
+branch of the same rule already handles. So the fix belongs in the **shape**, not the vocabulary:
+
+```
+|(?!\d{4}[-.\s]\d{4}[-.\s]\d{4}(?![-.\s]?\d))\d{3,4}[-.\s]\d{3,4}[-.\s]\d{3,4}
+```
+
+Deny the four-four-four shape and the collision closes for **every** word, not one at a time.
+
+**What was deliberately not changed.** `resolve_overlaps` ranks by confidence before severity, and
+that ordering is itself the result of an earlier bug ([D16](#d16--overlap-resolution-ranks-confidence-before-severity)).
+Severity says how bad a finding would be *if true*; confidence says how likely it is *to be true*;
+choosing between two readings of the same characters is a question about truth. The resolver was
+right — it was fed a false claim. Re-ranking it to "fix" this would have re-broken Luhn-validated
+card numbers being reported as Aadhaar.
+
+**How it was found, which is the part worth recording.** By a **dashboard test**. It asserted that
+an analysed prompt appeared on the page as `AADHAAR`, and the page said `PHONE`. Not by the corpus —
+for the **third** consecutive time, after the credential gap ([D46](#d46--passwords-the-gap-a-user-found-by-pasting-one))
+and the marker vocabulary ([D48](#d48--the-marker-vocabulary-was-written-from-one-departments-language)).
+A corpus scores the detectors you built against the samples **you thought to write**, and nobody
+thought to write a sample with an Aadhaar number and a phone number in the same sentence. Rerunning
+the corpus after the fix produced numbers that were bit-for-bit identical — it could neither find
+this defect nor confirm the repair.

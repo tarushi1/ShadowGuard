@@ -14,7 +14,7 @@ It computes a risk score and decides whether to **allow**, **warn**, **redact**,
 
 > Read `README.md` and `docs/decisions.md` in this repo, in that order, before doing anything else.
 > `README.md` is the session-recovery document: it has current state, the exact next task, and the
-> mentoring contract I work under. `docs/decisions.md` is the decision log (D1–D49) — every choice
+> mentoring contract I work under. `docs/decisions.md` is the decision log (D1–D51) — every choice
 > and its reasoning, so you don't re-litigate settled decisions or contradict them. Then tell me
 > what you understand the next task to be, and wait for me to confirm before writing code.
 
@@ -23,7 +23,7 @@ It computes a risk score and decides whether to **allow**, **warn**, **redact**,
 | File | What it gives a fresh session |
 |---|---|
 | **`README.md`** | State, next task, roadmap, how to run everything, measured results, the mentoring contract |
-| **`docs/decisions.md`** | **D1–D49** — why every choice was made, and what was rejected. This is what stops a new session undoing settled work |
+| **`docs/decisions.md`** | **D1–D51** — why every choice was made, and what was rejected. This is what stops a new session undoing settled work |
 
 If it needs more, point it at the [knowledge base index](docs/README.md) — but don't paste those
 up front. A session that reads everything before starting spends its context on history instead of
@@ -110,11 +110,11 @@ like code, and only executable checks notice — which is why a few agreements a
 | **Last updated** | 2026-08-23 |
 | **Review-I** | ✅ **completed 19 Aug 2026** |
 | **Project root** | `/Users/arushitiwari/Desktop/ShadowGuard` |
-| **Git branch** | `main` (82 commits, working tree clean) |
+| **Git branch** | `main` (83 commits, working tree clean) — **nothing pushed to the remote yet** |
 | **Current stage** | Stages 0–4 live: interception, regex, entropy, semantic, OCR, risk engine, redaction, persistence — for text **and** images, on ChatGPT and (unverified) Gemini. |
-| **Completed** | **Weeks 1–6 complete.** Gemini adapter written but **not verified against the live site**. |
-| **Next task** | **Week 7 — the administrative dashboard** (React vs Flask still to decide) |
-| **Tests** | **301 Python** (`pytest -q`) · **67 JavaScript** (`npm test`) · extension **v0.11.2** |
+| **Completed** | **Weeks 1–7 complete.** Gemini adapter written but **not verified against the live site**. |
+| **Next task** | **Week 8 — hardening, report, diagrams, demo.** Also open: close bypass B1, live-verify Gemini, improve OCR retention for `GOOGLE_API_KEY` and `JWT` (both 0%) |
+| **Tests** | **316 Python** (`pytest -q`) · **67 JavaScript** (`npm test`) · extension **v0.11.2** |
 | **Measured** | 230-sample corpus — text: recall **98.3%**, FPR **0%**, F1 **99.1%** (regex alone **75.7%**) · images: OCR retention **93.9%**, OCR-induced FPR **2.0%** |
 | **Deadline** | ~2026-09-20 (8 weeks from 2026-07-26) |
 | **Weeks elapsed** | **3.3 of 8**, with 6 weeks of plan delivered — well ahead |
@@ -398,7 +398,6 @@ These were decided on 2026-07-26 and should **not** be re-litigated without a de
 
 | Question | When it gets decided |
 |---|---|
-| Dashboard: React vs. Flask + Jinja | Week 6 |
 | Store uploaded images, or only extracted OCR text? | Week 6 — a real privacy question, worth a paragraph in the report |
 | Local-only backend vs. deployed | Week 8 |
 
@@ -533,13 +532,14 @@ ShadowGuard/
 │   ├── app/
 │   │   ├── main.py             FastAPI app, CORS, lifespan (warms spaCy, opens the store).
 │   │   ├── api/routes/
-│   │   │   └── analyze.py      HTTP only — parse, call pipeline, log, persist, respond.
+│   │   │   ├── analyze.py      HTTP only — parse, call pipeline, log, persist, respond.
+│   │   │   └── dashboard.py    The admin page. Read-only: every non-GET returns 405.
 │   │   ├── schemas/
 │   │   │   └── analyze.py      Pydantic models = the typed contract. THIS is the API spec.
 │   │   ├── detectors/          Pure functions. No I/O, no HTTP — which is what lets the
 │   │   │   │                   evaluation harness call them hundreds of times per second.
 │   │   │   ├── base.py         Finding, overlap resolution, severity ordering.
-│   │   │   ├── regex_detector.py     Stage 1a — 16 rules, Luhn, context gates (D29).
+│   │   │   ├── regex_detector.py     Stage 1a — 20+ rules, Luhn, context gates (D29).
 │   │   │   ├── entropy_detector.py   Stage 1b — Shannon entropy for unknown formats.
 │   │   │   ├── semantic_detector.py  Stage 2 — Presidio + spaCy, entity allowlist (D28).
 │   │   │   └── catalog.py      entity type → severity, assembled FROM the detectors.
@@ -548,12 +548,17 @@ ShadowGuard/
 │   │   ├── core/
 │   │   │   ├── policy.py       EVERY tunable weight and threshold. Data, not code.
 │   │   │   ├── risk.py         Weighted fusion (D33). The arithmetic only.
-│   │   │   └── redactor.py     Typed placeholders + coverage (D36, D37).
+│   │   │   ├── redactor.py     Typed placeholders + coverage (D36, D37).
+│   │   │   └── behaviour.py    Stage 4 — a multiplier on the score, never a finding (D49).
 │   │   ├── models/
 │   │   │   └── event.py        SQLAlchemy tables. No column can hold a prompt.
-│   │   └── db/
-│   │       ├── session.py      Lazy engine, SQLite pragmas, transactional scope.
-│   │       └── events.py       The ONLY module that writes. Dashboard queries live here.
+│   │   ├── db/
+│   │   │   ├── session.py      Lazy engine, SQLite pragmas, transactional scope.
+│   │   │   └── events.py       The ONLY module that writes. Dashboard queries live here.
+│   │   └── templates/
+│   │       └── dashboard.html  The admin UI, server-rendered by this same app (D50).
+│   │                           No chart library: bars are divs. A CDN request would
+│   │                           break the no-external-calls property, invisibly.
 │   └── tests/                  pytest suite, incl. conftest.py isolating the database.
 │
 ├── evaluation/                 ← your grade depends on this folder
@@ -563,7 +568,6 @@ ShadowGuard/
 │   ├── run_eval.py             action-level AND entity-level metrics, three configurations.
 │   └── corpus-spec-v2.md       the PRE-REGISTERED extension spec, then graded (D32).
 │
-├── dashboard/                  ← admin UI  [empty — Week 7, tech choice open]
 ├── docs/                       ← the knowledge base. Read docs/README.md first.
 ├── data/                       ← the SQLite decision store  [gitignored — local user data]
 └── scripts/                    ← setup helpers  [empty]
@@ -760,8 +764,9 @@ Every task is independently testable — you know it works before moving on.
 Tesseract · image preprocessing (where OCR accuracy is won or lost) · feeding OCR text back
 through Stages 1–2 · then the Gemini site adapter.
 
-### Week 7 — Stage 4 + dashboard
-Rolling behavioral baseline (z-scores over a user's own history) · dashboard UI · charts.
+### Week 7 — Stage 4 + dashboard ✅
+Rolling behavioural baseline (z-scores over a user's own history, D49) · dashboard UI · charts.
+Server-rendered on the existing FastAPI app rather than a second process (D50).
 
 ### Week 8 — Hardening, report, demo
 Final evaluation run · README polish · architecture diagrams · limitations & ethics · rehearsed
@@ -822,11 +827,14 @@ pip install fastapi uvicorn
 uvicorn backend.app.main:app --reload
 ```
 
+With the server up, the admin dashboard is at **http://127.0.0.1:8000/dashboard** — every decision
+the pipeline has made, and no message content, because the schema has nowhere to put any (D50).
+
 ### Toolchain status
 
 | Tool | State | Notes |
 |---|---|---|
-| Node 22.18 / npm 10.9 | ✅ | For the dashboard later |
+| Node 22.18 / npm 10.9 | ✅ | Runs the extension's test suite (`npm test`) |
 | Chrome | ✅ | |
 | Homebrew | ✅ | |
 | git 2.50 | ✅ | Committing as `tarushi1 <arushitiwari1503@gmail.com>` |
