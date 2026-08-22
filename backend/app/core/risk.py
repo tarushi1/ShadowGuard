@@ -52,6 +52,7 @@ from dataclasses import dataclass
 from ..detectors.base import Finding, context_window
 from ..schemas.analyze import Action, RiskLevel
 from . import redactor
+from .behaviour import BehaviourSignal
 from .policy import CLASS_OF, DATA_SUBJECT_MARKERS, DEFAULT_POLICY, RiskPolicy
 
 # `\b` matters as much here as it did in D29: without it, `hr` matches
@@ -118,18 +119,33 @@ def assess(
     findings: list[Finding],
     text: str,
     policy: RiskPolicy = DEFAULT_POLICY,
+    behaviour: "BehaviourSignal | None" = None,
 ) -> RiskAssessment:
     """Fuse findings into a single verdict.
 
     :param findings: everything the detection stages produced
     :param text: the analysed text, needed for context lookups
     :param policy: the tunable opinions; defaults to DEFAULT_POLICY
+    :param behaviour: Stage 4's view of how unusual this is for this
+        user. OPTIONAL, and defaulting to None is what keeps the
+        evaluation harness meaningful: the corpus is a set of isolated
+        messages with no user history, so it calls this without a
+        signal and measures content detection alone.
     """
     if not findings:
+        # Zero times any multiplier is still zero, and that is a
+        # property worth stating rather than relying on. Behaviour can
+        # raise the priority of a real finding; it must never
+        # manufacture a verdict from nothing, or it becomes a second
+        # detector that no corpus can measure.
         return RiskAssessment(0, Action.ALLOW, RiskLevel.LOW, ())
 
     reasons: list[str] = []
     score = _score_of(findings, text, policy, reasons)
+
+    if behaviour is not None and not behaviour.is_neutral:
+        score = min(100.0, score * behaviour.multiplier)
+        reasons.extend(behaviour.reasons)
 
     return RiskAssessment(
         score=round(score),

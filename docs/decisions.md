@@ -1287,6 +1287,59 @@ which the ORGANIZATION mislabelling above shows is already close.
 
 ---
 
+## D49 — Stage 4 modulates the score; it never produces findings
+
+**Context.** Stages 1–3 ask *"is this message sensitive?"*. Stage 4 asks *"is this normal for this
+person?"* — a developer who pastes stack traces all day, then pastes an eight-thousand-character
+customer export, is doing something unusual for themselves even when no detector fires.
+
+**Chosen:** a **multiplier on the fused score**, never a finding.
+
+If Stage 4 produced findings it would pollute the per-entity metrics, and — worse — it would let
+*"unusual"* masquerade as *"sensitive"*, which are different claims. A message with no findings
+scores zero, and **zero times any multiplier is still zero**. That property is asserted by a test,
+because it is what stops this stage becoming a second detector no corpus can measure.
+
+**Two signals, both from metadata the store already holds:**
+
+| Signal | Rationale |
+|---|---|
+| Message length z-score ≥ 3σ | The bulk-export case. 3σ rather than 2σ because message length is heavily right-skewed — most are short, a few are pasted documents — so 2σ fires on ordinary long messages |
+| An entity type this user has never sent | The most **explainable** signal. *"You have never sent a payment card before"* means something; *"your z-score is 3.2"* does not |
+
+Capped at **1.6×**. Behaviour is circumstantial: it may raise the priority of a real finding and
+must never dominate the content signal.
+
+**Cold start.** Below 20 events the signal is neutral. A system that reads "no baseline" as
+"suspicious" punishes everyone on their first day; one that reads it as "safe" is exploitable by
+anyone willing to change their id. **With no evidence, add no evidence.**
+
+**Where it is computed, and why that matters.** In `analyze()`, not in `run_stages()`. The
+evaluation harness calls `run_stages` directly over a corpus of isolated messages with no user
+history — so the measured numbers stay a claim about **content detection**, and adding this stage
+left them bit-for-bit identical. Had the signal leaked into the default path, every corpus figure
+would silently have become a claim about user history instead.
+
+**The limitation that nearly disqualifies this stage, stated first rather than discovered.**
+`user_id` is **client-supplied** ([B6](security.md)). Anyone can send any value, so a behavioural
+profile is reset by changing one string in a request.
+
+That weakness is survivable for Stages 1–3, which inspect content and do not care who sent it. Here
+it is close to fatal, because this stage is *entirely* about identity. It raises the cost of a
+careless mistake and does **nothing whatever** against a deliberate one. A real deployment must take
+identity from an authenticated session.
+
+It is built anyway, for two reasons: the mechanism is the contribution, and claiming a behavioural
+capability without implementing it would be worse than implementing one with a documented hole.
+
+**The privacy question this stage raises about itself.** A tool that exists to reduce data exposure
+now maintains a per-user behavioural profile. The mitigation is that the profile is derived
+entirely from metadata the store already holds — lengths, entity types, timestamps — and never from
+content, which the schema cannot hold in the first place (D41). *A behavioural profile built by a
+privacy tool ought to be built from as little as possible.*
+
+---
+
 ## Still open
 
 | Question | Decide by |

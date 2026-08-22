@@ -27,7 +27,7 @@ import time
 import uuid
 from dataclasses import dataclass
 
-from ..core import redactor, risk
+from ..core import behaviour, redactor, risk
 from ..core.policy import DEFAULT_POLICY, RiskPolicy
 from ..detectors import entropy_detector, ocr, regex_detector, semantic_detector
 from ..detectors.base import Finding, highest_severity, resolve_overlaps
@@ -63,6 +63,7 @@ def run_stages(
     use_entropy: bool = True,
     use_semantic: bool = True,
     policy: RiskPolicy = DEFAULT_POLICY,
+    behaviour=None,
 ) -> StageResult:
     """Run the detection stages and fuse them into a verdict.
 
@@ -124,7 +125,7 @@ def run_stages(
     # its own module because it is the one part of this pipeline whose
     # correct answer is an organisational choice rather than a
     # technical fact — see core/policy.py.
-    assessment = risk.assess(findings, text, policy)
+    assessment = risk.assess(findings, text, policy, behaviour)
 
     return StageResult(
         action=assessment.action,
@@ -190,7 +191,29 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
     # what turns three separate systems into one traceable story.
     request_id = uuid.uuid4().hex[:12]
 
-    result = run_stages(request.text)
+    # ---- Stage 4: behavioural baseline --------------------------
+    # Computed here rather than inside run_stages, because the
+    # evaluation harness calls run_stages directly with no user
+    # history — the corpus is a set of isolated messages. Threading the
+    # signal in at THIS level keeps the measured numbers about content
+    # detection and lets the live path use both.
+    #
+    # A first pass without behaviour tells us what was found; the
+    # signal then depends on those entity types, so the fusion runs
+    # twice. Cheap, because no detector runs the second time.
+    preliminary = run_stages(request.text)
+
+    signal = behaviour.signal_for(
+        request.user_id,
+        char_count=len(request.text),
+        entity_types=frozenset(f.type for f in preliminary.findings),
+    )
+
+    result = (
+        preliminary
+        if signal.is_neutral
+        else run_stages(request.text, behaviour=signal)
+    )
     action, level, score = result.action, result.level, result.score
     findings, stages_run = result.findings, result.stages_run
 
