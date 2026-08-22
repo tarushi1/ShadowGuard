@@ -615,7 +615,32 @@ RULES: tuple[Rule, ...] = (
             r"(?<![\d-])(?:"
             r"[6-9]\d{9}"                       # Indian mobile
             r"|0\d{2,4}[-.\s]\d{3,4}[-.\s]?\d{3,4}"  # 020 7946 0958
-            r"|\d{3,4}[-.\s]\d{3,4}[-.\s]\d{3,4}"    # loose triplet
+            # Loose triplet, with one shape carved out of it: FOUR-FOUR-FOUR.
+            #
+            # Twelve digits in three groups of four is the printed form
+            # of an Aadhaar number, and it is not the form of any
+            # telephone number anywhere -- a subscriber number that long
+            # carries a country code, which the branch above already
+            # handles. Left in, this branch claimed
+            #
+            #   "their aadhaar is 2345 6789 0123 ... phone +91 ..."
+            #
+            # as a PHONE, and at 0.8 against Aadhaar's 0.7 it won the
+            # overlap, turning a `critical` national identifier into a
+            # `low` contact detail.
+            #
+            # Note what is NOT being changed to fix that. The overlap
+            # resolver ranks confidence first, on purpose: severity says
+            # how bad a finding is IF TRUE, confidence says how likely
+            # it is TO BE TRUE, and choosing between two readings of the
+            # same characters is a question about truth. The resolver
+            # was right; the claim fed to it was false. The second time
+            # this collision has appeared (see _PHONE_CONTEXT above),
+            # and the first fix -- deleting "call" from the vocabulary
+            # -- treated the symptom, which is why it came back through
+            # another word. Denying the shape closes it for every word.
+            r"|(?!\d{4}[-.\s]\d{4}[-.\s]\d{4}(?![-.\s]?\d))"
+            r"\d{3,4}[-.\s]\d{3,4}[-.\s]\d{3,4}"
             r")(?![-.\s]?\d)"
         ),
         severity="low",

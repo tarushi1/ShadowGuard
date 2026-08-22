@@ -618,3 +618,60 @@ def test_paired_rules_do_not_share_a_context_gate():
     a formatted number needs no supporting word.
     """
     assert "PHONE" in types_in("ring (555) 123-4567 tomorrow")
+
+
+# ---------------------------------------------------------------
+# Aadhaar vs phone: the same collision, twice
+# ---------------------------------------------------------------
+# Found by a dashboard test, of all things — it asserted that an
+# analysed prompt showed up as AADHAAR on the page and it showed up as
+# PHONE instead. Worth noting how it was found: not by the corpus, for
+# the third time. The corpus scores the detectors you built against the
+# samples you thought to write, and nobody thought to write a sample
+# with an Aadhaar and a phone number in the same sentence.
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "their aadhaar is 2345 6789 0123, phone +91 98765 43210",
+        "aadhaar 8901 2345 6789, what verification api should we call",
+        "kyc docs attached, uid 3456 7890 1234 — call me if the mobile fails",
+    ],
+)
+def test_a_twelve_digit_aadhaar_is_never_read_as_a_telephone(text):
+    """A `critical` national id must not be demoted to a `low` contact.
+
+    Three groups of four digits is Aadhaar's printed form and no
+    telephone's, so the phone rule must not make the claim at all —
+    which matters more than who wins the overlap, because the overlap
+    resolver ranks by confidence and the phone rule's 0.8 will always
+    beat Aadhaar's 0.7.
+    """
+    types = {finding.type for finding in scan(text)}
+
+    assert "INDIA_AADHAAR" in types
+    assert not any(
+        finding.type == "PHONE" and "0123" in text[finding.start : finding.end]
+        for finding in scan(text)
+    )
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("my phone is 020 7946 0958", "020 7946 0958"),
+        ("call me on 9876543210 please", "9876543210"),
+        ("phone 555 123 4567", "555 123 4567"),
+        ("phone: 0300 200 3300", "0300 200 3300"),
+    ],
+)
+def test_real_telephone_shapes_still_match(text, expected):
+    """The other half of the fix above.
+
+    Carving a shape out of a pattern is the kind of change that quietly
+    costs recall, so every phone format the rule is meant to catch is
+    pinned here rather than left to the corpus to notice later.
+    """
+    matched = [text[f.start : f.end] for f in scan(text) if f.type == "PHONE"]
+
+    assert expected in matched
