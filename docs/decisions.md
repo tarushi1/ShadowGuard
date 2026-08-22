@@ -1173,6 +1173,66 @@ the tool for real.
 
 ---
 
+## D47 — Phone numbers, and the limit of enumerating categories
+
+**Context.** Stress-testing after Review-I with phrasings nobody had written found that
+`call me on 9876543210`, `+91 98765 43210` and `555-123-4567` were all allowed through.
+
+**There was no phone detector at all** — 23 entity types and not one of them a telephone number,
+which is probably the most common piece of personal data in a workplace message. The corpus had
+never caught it because the corpus had never contained one: **D46's lesson repeating, in a second
+category.**
+
+**Chosen:** two rules under one entity type, because the FORMAT carries different evidence.
+
+| Form | Gate |
+|---|---|
+| `+91 98765 43210`, `(555) 123-4567`, `555-123-4567` | none — self-evident |
+| `9876543210`, `020 7946 0958` | context word within 50 characters, as [D29](#d29--weak-rules-are-gated-on-nearby-context-words) |
+
+**Severity is `low`, in the `contact` class alongside `EMAIL`** — and that decision matters more
+than the patterns. A switchboard number on a company website is not personal data; the same number
+beside a customer's name is a contactable identity. So a phone number alone stays `allow`, and only
+the `identity + contact` combination makes it actionable. `phone the office on 020 7946 0958`
+remains correctly allowed.
+
+**Two bugs this exposed.**
+
+**A latent one, in shared context gates.** `_CONTEXT_PATTERNS` was keyed by rule NAME. With PHONE
+split across two rules and only the second declaring context words, the first silently inherited
+the second's gate — `(555) 123-4567` was rejected for having no nearby "phone". Now keyed by rule
+identity. PASSWORD had the same shape and had not been bitten only because neither of its rules
+declares context words.
+
+**A regression I caused.** The word `call` was in the phone context list, and gated a phone match
+onto an Aadhaar number:
+
+```
+"aadhaar 8901 2345 6789, what verification api should we call"
+    expected INDIA_AADHAAR  ->  found PHONE  ->  allow
+```
+
+PHONE outranked INDIA_AADHAAR on confidence (0.8 vs 0.7) and, being `low` severity, downgraded a
+national identifier to an allow. Bare `call`, `text`, `contact` and `reach` are all commoner in
+technical prose than in a telephone context, and are replaced by phrases — `call me on` is a
+telephone, `call the API` is not.
+
+**Measured:** recall 98.1% → **98.2%** on a corpus grown from 210 to 218, false-positive rate
+still **0%**, regex-only 82.9% → 79.8% (the denominator grew with four new sensitive samples).
+
+**The wider decision: stop enumerating.** Sensitive-data categories cannot be enumerated — passport,
+driving licence, NHS number, vehicle registration, IP address, insurance policy, GST, IFSC, and a
+new one for every country and industry. A design whose defence is one detector per category never
+finishes.
+
+Entropy, semantic recognition and risk fusion need **no list at all**, and that is where coverage
+scales. Structured detectors are added only for the highest-frequency gaps and then stopped, with
+the enumeration limit stated as a bounded scope rather than concealed behind a longer rule set.
+**Postal addresses are deliberately not attempted**: they have no reliable cross-country format, and
+a loose pattern would cost the 0% false-positive rate that makes the tool usable at all.
+
+---
+
 ## Still open
 
 | Question | Decide by |

@@ -166,6 +166,34 @@ _LABELS_STRONG = (
 _LABELS_WEAK = ("token", "secret", "pwd", "pass")
 
 
+# Words that mark a digit run as a telephone number.
+#
+# Deliberately excludes the generic word "number", which precedes
+# account numbers, order numbers, reference numbers and invoice
+# numbers far more often than it precedes a telephone.
+# Bare "call", "text", "contact" and "reach" were here and are
+# deliberately NOT. Each is far commoner in technical prose than in a
+# telephone context -- "which API should we call", "the text field",
+# "the contact page" -- and "call" alone cost a corpus regression
+# immediately: it gated a phone match onto an AADHAAR number in
+#
+#   "aadhaar 8901 2345 6789, what verification api should we call"
+#
+# PHONE then outranked INDIA_AADHAAR on confidence and, being `low`
+# severity, downgraded a national identifier to an allow.
+#
+# The verb forms are kept as PHRASES instead, which is the distinction
+# that actually matters: "call me on" is a telephone, "call the API" is
+# not.
+_PHONE_CONTEXT = (
+    "phone", "telephone", "mobile", "cell", "cellphone", "tel",
+    "dial", "sms", "whatsapp", "helpline", "landline",
+    "call me", "call him", "call her", "call them", "call us",
+    "ring me", "ring him", "ring her", "reach me", "reach him", "reach her",
+    "contact number", "contact me", "contact him", "contact her",
+)
+
+
 def _alternation(labels: tuple[str, ...]) -> str:
     return "|".join(re.escape(word).replace(r"\ ", r"\s+") for word in labels)
 
@@ -544,6 +572,61 @@ RULES: tuple[Rule, ...] = (
         description="Credentials embedded in a database or service URI.",
     ),
 
+    # ---- Telephone numbers --------------------------------------
+    # Split into two rules because the FORMAT carries different
+    # amounts of evidence.
+    #
+    # A leading "+" country code, or a parenthesised area code, or a
+    # 3-3-4 hyphenated group, is a telephone number and essentially
+    # nothing else. A bare run of ten digits is also an order number,
+    # an invoice id, a tracking code and a timestamp -- so that form is
+    # gated on a nearby word, exactly as INDIA_AADHAAR is (D29).
+    #
+    # Severity is LOW, in the `contact` class alongside EMAIL, and that
+    # is the important design decision rather than the patterns. A
+    # switchboard number on a company website is not sensitive; the
+    # same number beside a customer's name is a contactable identity.
+    # Expressing that is the risk engine's job, not this file's -- so
+    # a phone number alone stays `allow` and only combines into
+    # something actionable (D33).
+    Rule(
+        name="PHONE",
+        pattern=re.compile(
+            # +91 98765 43210 · +1 (555) 123-4567 · +44 20 7946 0958
+            # The trailing group is OPTIONAL: "+91 98765 43210" has two
+            # groups after the country code, "+1 555 123 4567" has three.
+            r"\+\d{1,3}[-.\s]?\(?\d{2,5}\)?[-.\s]?\d{3,5}(?:[-.\s]?\d{3,5})?\b"
+            # (555) 123-4567
+            r"|\(\d{3}\)\s?\d{3}[-.\s]\d{4}\b"
+            # 555-123-4567 — three groups, distinct from the 3-2-4 of a
+            # US SSN, so the two rules cannot collide.
+            r"|\b\d{3}-\d{3}-\d{4}\b",
+        ),
+        severity="low",
+        confidence=0.85,
+        description="Telephone number in a self-evident format.",
+    ),
+    Rule(
+        name="PHONE",
+        # The ambiguous forms: a bare national number, or loosely
+        # grouped digits. The trailing lookahead stops this matching
+        # the first twelve digits of a payment card.
+        pattern=re.compile(
+            r"(?<![\d-])(?:"
+            r"[6-9]\d{9}"                       # Indian mobile
+            r"|0\d{2,4}[-.\s]\d{3,4}[-.\s]?\d{3,4}"  # 020 7946 0958
+            r"|\d{3,4}[-.\s]\d{3,4}[-.\s]\d{3,4}"    # loose triplet
+            r")(?![-.\s]?\d)"
+        ),
+        severity="low",
+        confidence=0.8,
+        context_words=_PHONE_CONTEXT,
+        description=(
+            "Telephone number in an ambiguous format. Gated on a nearby "
+            "word because ten digits is equally an order or invoice number."
+        ),
+    ),
+
     # ---- Contact details ----------------------------------------
     # Low severity on its own: an email address is not a secret. It
     # matters in combination — a name plus an email plus an account
@@ -563,8 +646,19 @@ RULES: tuple[Rule, ...] = (
 # `\b` around the group is doing real work: without it, "pan" matches
 # inside "company", "expand", "Japan" and "panel", and the gate would
 # wave through most of what it exists to stop.
-_CONTEXT_PATTERNS: dict[str, re.Pattern] = {
-    rule.name: re.compile(
+# Keyed by rule IDENTITY, not by name.
+#
+# Two rules may deliberately share a name — PHONE and PASSWORD are each
+# split in two, because the FORMAT of a match changes how much evidence
+# it carries. Keying this by name made the pair share one gate: the
+# self-evident `(555) 123-4567` rule silently inherited the context
+# requirement belonging to the ambiguous bare-digits rule, and was
+# rejected for having no nearby "phone".
+#
+# `id()` is stable here because RULES is a module-level tuple that lives
+# for the process lifetime.
+_CONTEXT_PATTERNS: dict[int, re.Pattern] = {
+    id(rule): re.compile(
         r"\b(?:" + "|".join(re.escape(word) for word in rule.context_words) + r")\b",
         re.IGNORECASE,
     )
@@ -573,7 +667,7 @@ _CONTEXT_PATTERNS: dict[str, re.Pattern] = {
 }
 
 
-def has_supporting_context(text: str, start: int, end: int, rule_name: str) -> bool:
+def has_supporting_context(text: str, start: int, end: int, rule: "Rule") -> bool:
     """Does a supporting word appear near this match?
 
     The match itself is EXCLUDED from the searched window, and that is
@@ -585,9 +679,9 @@ def has_supporting_context(text: str, start: int, end: int, rule_name: str) -> b
     :param text: the full text being scanned
     :param start: match start offset
     :param end: match end offset, exclusive
-    :param rule_name: which rule's context words to look for
+    :param rule: the rule being applied; its own context words are used
     """
-    pattern = _CONTEXT_PATTERNS.get(rule_name)
+    pattern = _CONTEXT_PATTERNS.get(id(rule))
     if pattern is None:  # ungated rule — nothing to satisfy
         return True
 
@@ -631,7 +725,7 @@ def scan(text: str) -> list[Finding]:
             # different questions, so two separate gates — a valid PAN
             # quoted as an example format is well-formed and still not
             # a disclosure.
-            if not has_supporting_context(text, start, end, rule.name):
+            if not has_supporting_context(text, start, end, rule):
                 continue
 
             findings.append(

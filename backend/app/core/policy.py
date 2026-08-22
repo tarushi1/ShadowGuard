@@ -45,6 +45,7 @@ CLASS_OF: dict[str, str] = {
     # linkable, contactable individual, which is personal data under
     # GDPR in a way that neither half is on its own.
     "EMAIL": "contact",
+    "PHONE": "contact",
     # Issued by a state, uniquely identifying, and not reissuable.
     "US_SSN": "government_id",
     "INDIA_AADHAAR": "government_id",

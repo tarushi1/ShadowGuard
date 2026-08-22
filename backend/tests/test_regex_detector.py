@@ -277,10 +277,11 @@ def test_a_match_cannot_supply_its_own_context():
     happen to spell a context word would validate itself — a gate the
     sender can satisfy by choosing a convenient value is not a gate.
     """
-    from backend.app.detectors.regex_detector import has_supporting_context
+    from backend.app.detectors.regex_detector import RULES, has_supporting_context
 
+    rule = next(r for r in RULES if r.name == "INDIA_PAN")
     text = "PANAB1234C"
-    assert not has_supporting_context(text, 0, len(text), "INDIA_PAN")
+    assert not has_supporting_context(text, 0, len(text), rule)
 
 
 def test_strong_rules_are_not_gated():
@@ -553,3 +554,67 @@ def test_broadening_the_labels_did_not_cost_precision(text):
     every English word that might follow them.
     """
     assert "PASSWORD" not in types_in(text), f"false positive on: {text}"
+
+
+# ---------------------------------------------------------------
+# Telephone numbers
+# ---------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "his phone number is +91 98765 43210",
+        "ring (555) 123-4567 tomorrow",
+        "contact 555-123-4567 for details",
+        "call me on 9876543210",
+        "phone the office on 020 7946 0958",
+        "+44 20 7946 0958 is the desk",
+    ],
+)
+def test_telephone_numbers_are_detected(text):
+    """The gap found by testing phrasings nobody had written.
+
+    There was no phone detector at all — 23 entity types and none of
+    them a telephone number, which is probably the most common piece
+    of personal data in a workplace message. The corpus never caught it
+    because the corpus never contained one.
+    """
+    assert "PHONE" in types_in(text), f"missed a phone number in: {text}"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "order 1234567890 shipped this morning",
+        "invoice 9876543210 is unpaid",
+        "customer reference CUST-4471-8823-0095 needs updating",
+        "the meeting is at 10:30 in room 4-2-1",
+    ],
+)
+def test_digit_runs_that_are_not_phone_numbers_are_ignored(text):
+    """A bare ten-digit run is equally an order number, an invoice id
+    or a tracking code. The ambiguous form is gated on a nearby word
+    for exactly the reason INDIA_AADHAAR is (D29)."""
+    assert "PHONE" not in types_in(text), f"false positive on: {text}"
+
+
+def test_a_phone_number_does_not_shadow_a_card_or_an_ssn():
+    """Three rules now compete over digit runs. A card must still read
+    as a card, and an SSN as an SSN."""
+    assert types_in("charge 4111 1111 1111 1111 please") == {"CREDIT_CARD"}
+    assert types_in("his ssn is 123-45-6789") == {"US_SSN"}
+
+
+def test_paired_rules_do_not_share_a_context_gate():
+    """Regression for a latent bug the phone rules exposed.
+
+    `_CONTEXT_PATTERNS` was keyed by rule NAME. PHONE is split into two
+    rules — one for self-evident formats, one for ambiguous digit runs —
+    and only the second declares context words. Keying by name made the
+    first inherit the second's gate, so `(555) 123-4567` was rejected
+    for having no nearby "phone".
+
+    Keying by rule identity fixes it, and this test pins the property:
+    a formatted number needs no supporting word.
+    """
+    assert "PHONE" in types_in("ring (555) 123-4567 tomorrow")

@@ -63,7 +63,7 @@
 {"id": "H012", "label": "benign", "category": "hard-negative", "difficulty": "hard", "expected": [], "text": "checksum of the artifact is d41d8cd98f00b204e9800998ecf8427e, does it match yours", "note": "MD5 hash"}
 {"id": "H013", "label": "benign", "category": "hard-negative", "difficulty": "hard", "expected": [], "text": "npm reports integrity sha512-Kd8Fj3Nq7Wt2Yr5BvXz9Qm4Lp1Hs6Tg0Ue3Ri8Oy5Pa2Nc mismatch on install", "note": "integrity hash"}
 {"id": "H014", "label": "benign", "category": "hard-negative", "difficulty": "hard", "expected": [], "text": "the meeting bridge is 0000 0000 0000 0000 and the pin is four digits", "note": "passes Luhn but is a placeholder"}
-{"id": "H015", "label": "benign", "category": "hard-negative", "difficulty": "hard", "expected": [], "text": "phone the office on 020 7946 0958 if the deploy stalls overnight", "note": "digit run, not a card"}
+{"id": "H015", "label": "benign", "category": "hard-negative", "difficulty": "hard", "expected": ["PHONE"], "text": "phone the office on 020 7946 0958 if the deploy stalls overnight", "note": "a real phone number, correctly ALLOWED: a switchboard number is not personal data"}
 {"id": "H016", "label": "benign", "category": "hard-negative", "difficulty": "hard", "expected": [], "text": "employee badge numbers run from 100000000000 to 999999999999 in the new scheme", "note": "12 digits, Aadhaar-shaped"}
 {"id": "H017", "label": "benign", "category": "hard-negative", "difficulty": "hard", "expected": [], "text": "our sku format is ABCDE1234F which collides with something in the validator", "note": "PAN-shaped but discussed abstractly"}
 {"id": "H018", "label": "benign", "category": "hard-negative", "difficulty": "hard", "expected": [], "text": "explain what a JWT is and why the header and payload are base64url encoded", "note": "mentions JWT without containing one"}
@@ -224,3 +224,13 @@
 {"id": "H058", "label": "benign", "category": "hard-negative", "difficulty": "hard", "expected": [], "text": "this is a password-protected document, how do I open it in python", "note": "G8 hyphenated word, not a separator"}
 {"id": "H059", "label": "benign", "category": "hard-negative", "difficulty": "hard", "expected": [], "text": "the docs show password: ******** as the masked example", "note": "G8 already masked in the message"}
 {"id": "H060", "label": "benign", "category": "hard-negative", "difficulty": "hard", "expected": [], "text": "we need to bypass: the cache layer for this one endpoint", "note": "G8 'pass' inside another word"}
+
+{"id": "S106", "label": "sensitive", "category": "pii", "difficulty": "hard", "expected": ["PERSON", "PHONE"], "text": "customer Rahul Sharma can be reached on +91 98765 43210 about the refund", "note": "G9 phone: name plus a contact channel is a linkable identity"}
+{"id": "S107", "label": "sensitive", "category": "pii", "difficulty": "hard", "expected": ["PERSON", "PHONE"], "text": "the claimant Meera Iyer left her mobile 9845012345, please call her back", "note": "G9 phone: ambiguous format, gated on a nearby word"}
+{"id": "S108", "label": "sensitive", "category": "pii", "difficulty": "hard", "expected": ["PERSON", "PHONE", "EMAIL"], "text": "patient Daniel Osei, tel (555) 123-4567, email d.osei@example.com on file", "note": "G9 phone: full contactable record"}
+{"id": "S109", "label": "sensitive", "category": "pii", "difficulty": "hard", "expected": ["PHONE", "PERSON"], "text": "escalation contact for Nadia Sherwood is 555-987-6543 out of hours", "note": "G9 phone: hyphenated format needs no supporting word"}
+
+{"id": "H061", "label": "benign", "category": "hard-negative", "difficulty": "hard", "expected": [], "text": "order 1234567890 shipped this morning, tracking is with the courier", "note": "G10 ten digits that are an order number, not a phone"}
+{"id": "H062", "label": "benign", "category": "hard-negative", "difficulty": "hard", "expected": [], "text": "invoice 9876543210 is still unpaid in the ledger", "note": "G10 ten digits, invoice reference"}
+{"id": "H063", "label": "benign", "category": "hard-negative", "difficulty": "hard", "expected": [], "text": "the build ran for 3600 1800 900 seconds across the three stages", "note": "G10 loosely grouped digits that are durations"}
+{"id": "H064", "label": "benign", "category": "hard-negative", "difficulty": "hard", "expected": ["PHONE"], "text": "our support helpline is 1800 123 4567 and it is on the website", "note": "G10 a published support number, correctly allowed"}
