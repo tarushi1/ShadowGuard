@@ -433,7 +433,24 @@
     // "print it, scan it, attach it" a one-step bypass of every rule in
     // the system. The server already says so in `message`; this is
     // where the user gets told.
-    if (verdict.pdf && verdict.pdf.has_text_layer === false) {
+    //
+    // GUARDED ON `allow`, and the ordering is the whole point. Put
+    // this check first and a document with no page text but a secret
+    // in its metadata or form fields — blocked, score 100 — is shown
+    // "we could not read this" with a Proceed button under fail-open
+    // policy. That turns a BLOCK into an override prompt, which is a
+    // worse bug than the silence it was written to fix. A verdict that
+    // found something is always reported as a verdict; the unread
+    // notice is only for the case where nothing was found because
+    // nothing could be read.
+    //
+    // Documents that were partly read still say so — `kind.preview()`
+    // appends "NO TEXT LAYER" to the risk modal's preview line.
+    if (
+      verdict.action === SG.ACTION.ALLOW &&
+      verdict.pdf &&
+      verdict.pdf.has_text_layer === false
+    ) {
       const decision = await modal.show({
         variant: "changed",
         message: verdict.message,

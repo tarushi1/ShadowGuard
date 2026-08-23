@@ -1587,6 +1587,18 @@ far likelier to be genuine than hostile, and refusing it outright pushes the use
 unchecked. Exception handling throughout is deliberately broad, because a malformed annotation
 dictionary must cost that annotation — not the document, and never the process.
 
+**The bug this shipped with, found by looking at real output.** The "could not read this PDF"
+notice was placed *before* the check on the verdict, so a document with no page text but a payment
+card in its form fields — blocked, score 100 — was shown *"we could not read this"* **with a
+Proceed button** under fail-open policy. A safety notice that converts a `block` into an override
+prompt is a worse bug than the silence it was written to fix.
+
+Nothing caught it. Every test passed, because none of them combined `has_text_layer: false` with a
+non-`allow` verdict. It surfaced from running seven real documents through the whole stack and
+reading the resulting table — the form-field row said `block` and `layer=False` on the same line.
+The lesson is the same one D39 records: **look at the output, not only at the assertions**, because
+a test suite only knows the combinations someone thought to write.
+
 **Naming.** `ImageInterceptor` became `AttachmentInterceptor` in the same change. A class that
 intercepts PDFs while calling itself an image interceptor is a comment that has started lying, and
 this codebase is not worth much if its names cannot be trusted.

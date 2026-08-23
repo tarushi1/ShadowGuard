@@ -114,7 +114,7 @@ like code, and only executable checks notice — which is why a few agreements a
 | **Current stage** | Stages 0–4 live: interception, regex, entropy, semantic, OCR, PDF, risk engine, redaction, persistence — for text, images **and PDFs**, on ChatGPT and (unverified) Gemini. |
 | **Completed** | **Weeks 1–7 complete.** Gemini adapter written but **not verified against the live site**. |
 | **Next task** | **Week 8 — hardening, report, diagrams, demo.** Also open: live-verify the Gemini adapter, improve OCR retention for `GOOGLE_API_KEY` and `JWT` (both 0%, bypass B11) |
-| **Tests** | **336 Python** (`pytest -q`) · **73 JavaScript** (`npm test`) · extension **v0.13.0** |
+| **Tests** | **336 Python** (`pytest -q`) · **78 JavaScript** (`npm test`) · extension **v0.13.0** |
 | **Measured** | 230-sample corpus — text: recall **98.3%**, FPR **0%**, F1 **99.1%** (regex alone **75.7%**) · images: OCR retention **93.9%**, OCR-induced FPR **2.0%** |
 | **Deadline** | ~2026-09-20 (8 weeks from 2026-07-26) |
 | **Weeks elapsed** | **3.3 of 8**, with 6 weeks of plan delivered — well ahead |
