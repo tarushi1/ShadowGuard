@@ -241,6 +241,25 @@ function polyfill(window) {
     };
   }
 
+  // DragEvent. JSDOM does not implement it at all, so a drop cannot be
+  // dispatched or constructed. Modelled on the ClipboardEvent shim
+  // above and for the same reason — the interceptor's drop path is
+  // real code that must be exercised, and the alternative is a path
+  // that only ever runs in a browser nobody is watching.
+  //
+  // The coordinates are carried because the replay reads them: some
+  // editors decide where a dropped file lands from clientX/clientY.
+  if (!window.DragEvent) {
+    window.DragEvent = class DragEvent extends window.Event {
+      constructor(type, init = {}) {
+        super(type, init);
+        this.dataTransfer = init.dataTransfer ?? null;
+        this.clientX = init.clientX ?? 0;
+        this.clientY = init.clientY ?? 0;
+      }
+    };
+  }
+
   // execCommand. Returns false by default: unimplemented in JSDOM, and
   // pretending otherwise would let code pass here that fails in Chrome.
   // A fake editor may replace this to model a specific behaviour.

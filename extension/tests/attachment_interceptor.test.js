@@ -223,3 +223,101 @@ test("stats count what actually happened", async () => {
   assert.equal(interceptor.stats.intercepted, 1);
   assert.ok(interceptor.stats.seen >= 1);
 });
+
+
+// ---------------------------------------------------------------
+// Drop — the path that was missing entirely
+// ---------------------------------------------------------------
+// Not a weakness in detection: an input nobody was watching. Dragging
+// a file onto ChatGPT fired no listener, so no analysis ran and
+// nothing was held. Found by a user dropping a PDF containing an AWS
+// key and reporting that it went through — the backend blocked that
+// same file at score 92 when it was finally asked.
+//
+// `paste` and `change` are the two paths you picture when you imagine
+// attaching a file, and both were covered and tested from week one.
+// Dragging is what people actually do with a file already sitting on
+// their desktop, which is exactly the case where it is a document
+// rather than a screenshot.
+
+function dropFiles(window, target, files) {
+  const transfer = new window.DataTransfer();
+  for (const file of files) transfer.items.add(file);
+
+  const event = new window.DragEvent("drop", {
+    dataTransfer: transfer,
+    bubbles: true,
+    cancelable: true,
+  });
+
+  target.dispatchEvent(event);
+  return event;
+}
+
+test("a dropped file is held and the page never sees it", async () => {
+  const { window, seen } = setup();
+  const composer = window.document.getElementById("prompt-textarea");
+
+  const event = dropFiles(window, composer, [image(window)]);
+  await new Promise((r) => window.setTimeout(r, 0));
+
+  assert.equal(seen.length, 1, "the dropped file was not intercepted");
+  assert.equal(seen[0].trigger, "drop");
+  assert.equal(
+    event.defaultPrevented, true,
+    "the page will still receive this drop — the file was never held"
+  );
+});
+
+test("a dropped PDF is held, not only images", async () => {
+  const { window, seen } = setup();
+  const composer = window.document.getElementById("prompt-textarea");
+
+  const pdf = new window.File([new Uint8Array([37, 80, 68, 70])], "claim.pdf", {
+    type: "application/pdf",
+  });
+
+  dropFiles(window, composer, [pdf]);
+  await new Promise((r) => window.setTimeout(r, 0));
+
+  assert.equal(seen.length, 1, "a dropped PDF was not intercepted");
+  assert.equal(seen[0].file.name, "claim.pdf");
+});
+
+test("dragged text is left alone", async () => {
+  // Dragging a text selection is an ordinary editing action and must
+  // stay one. Holding it would break the composer for something we
+  // have no ability to inspect as a file.
+  const { window, seen } = setup();
+  const composer = window.document.getElementById("prompt-textarea");
+
+  const transfer = new window.DataTransfer();
+  transfer.setData("text/plain", "just some words");
+
+  const event = new window.DragEvent("drop", {
+    dataTransfer: transfer,
+    bubbles: true,
+    cancelable: true,
+  });
+  composer.dispatchEvent(event);
+  await new Promise((r) => window.setTimeout(r, 0));
+
+  assert.equal(seen.length, 0, "a plain text drag was intercepted");
+  assert.equal(event.defaultPrevented, false, "a plain text drag was cancelled");
+});
+
+test("an approved dropped file is replayed once, not intercepted again", async () => {
+  const { window, seen } = setup({ allow: true });
+  const composer = window.document.getElementById("prompt-textarea");
+
+  const replayed = [];
+  composer.addEventListener("drop", (event) => {
+    if (event.dataTransfer?.files?.length) replayed.push(event);
+  });
+
+  dropFiles(window, composer, [image(window)]);
+  await new Promise((r) => window.setTimeout(r, 0));
+
+  assert.equal(seen.length, 1, "intercepted more than once — the replay looped");
+  assert.equal(replayed.length, 1, "the approved file was never put back");
+});

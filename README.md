@@ -14,7 +14,7 @@ It computes a risk score and decides whether to **allow**, **warn**, **redact**,
 
 > Read `README.md` and `docs/decisions.md` in this repo, in that order, before doing anything else.
 > `README.md` is the session-recovery document: it has current state, the exact next task, and the
-> mentoring contract I work under. `docs/decisions.md` is the decision log (D1–D53) — every choice
+> mentoring contract I work under. `docs/decisions.md` is the decision log (D1–D54) — every choice
 > and its reasoning, so you don't re-litigate settled decisions or contradict them. Then tell me
 > what you understand the next task to be, and wait for me to confirm before writing code.
 
@@ -23,7 +23,7 @@ It computes a risk score and decides whether to **allow**, **warn**, **redact**,
 | File | What it gives a fresh session |
 |---|---|
 | **`README.md`** | State, next task, roadmap, how to run everything, measured results, the mentoring contract |
-| **`docs/decisions.md`** | **D1–D53** — why every choice was made, and what was rejected. This is what stops a new session undoing settled work |
+| **`docs/decisions.md`** | **D1–D54** — why every choice was made, and what was rejected. This is what stops a new session undoing settled work |
 
 If it needs more, point it at the [knowledge base index](docs/README.md) — but don't paste those
 up front. A session that reads everything before starting spends its context on history instead of
@@ -68,7 +68,7 @@ than silently replacing broken code.
 
 **It is a security project, so say the uncomfortable things.** Point out risks, false positives,
 false negatives, privacy concerns, ethical problems and limitations without being asked. Bypasses
-are tracked in [docs/security.md](docs/security.md) as **B1–B17**, several of which this design
+are tracked in [docs/security.md](docs/security.md) as **B1–B18**, several of which this design
 created on purpose. Volunteering a weakness is far stronger than being asked about it.
 
 **Keep `README.md` and `docs/` current at all times**, not at the end. Documentation drifts exactly
@@ -114,7 +114,7 @@ like code, and only executable checks notice — which is why a few agreements a
 | **Current stage** | Stages 0–4 live: interception, regex, entropy, semantic, OCR, PDF, risk engine, redaction, persistence — for text, images **and PDFs**, on ChatGPT and (unverified) Gemini. |
 | **Completed** | **Weeks 1–7 complete.** Gemini adapter written but **not verified against the live site**. |
 | **Next task** | **Week 8 — hardening, report, diagrams, demo.** Also open: live-verify the Gemini adapter, improve OCR retention for `GOOGLE_API_KEY` and `JWT` (both 0%, bypass B11) |
-| **Tests** | **336 Python** (`pytest -q`) · **78 JavaScript** (`npm test`) · extension **v0.13.0** |
+| **Tests** | **336 Python** (`pytest -q`) · **82 JavaScript** (`npm test`) · extension **v0.13.1** |
 | **Measured** | 230-sample corpus — text: recall **98.3%**, FPR **0%**, F1 **99.1%** (regex alone **75.7%**) · images: OCR retention **93.9%**, OCR-induced FPR **2.0%** |
 | **Deadline** | ~2026-09-20 (8 weeks from 2026-07-26) |
 | **Weeks elapsed** | **3.3 of 8**, with 6 weeks of plan delivered — well ahead |

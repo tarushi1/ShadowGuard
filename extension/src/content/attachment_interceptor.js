@@ -8,13 +8,18 @@
  * which is the right split: what a file is only matters once someone
  * has to read it, and this class's job is to stop it travelling.
  *
- * Two ways a file gets into ChatGPT, and they need different
+ * Three ways a file gets into ChatGPT, and they need different
  * treatment:
  *
  *   PASTE       Cmd+V with a screenshot on the clipboard. A `paste`
  *               event carries the file, and the event is CANCELLABLE —
  *               so preventDefault() means the page never sees it at
  *               all. This is the clean path.
+ *
+ *   DROP        dragging a file from the desktop onto the composer.
+ *               Also cancellable, so it is handled like paste. This
+ *               path was missing until a user dropped a PDF carrying
+ *               an AWS key and watched it sail through — see B18.
  *
  *   FILE INPUT  clicking the + button and choosing a file. `change`
  *               is NOT cancellable in any useful sense: by the time it
@@ -77,6 +82,7 @@
 
       this._onPaste = this.#onPaste.bind(this);
       this._onChange = this.#onChange.bind(this);
+      this._onDrop = this.#onDrop.bind(this);
     }
 
     start() {
@@ -85,11 +91,13 @@
       // registration order and the page registered first.
       window.addEventListener("paste", this._onPaste, true);
       window.addEventListener("change", this._onChange, true);
+      window.addEventListener("drop", this._onDrop, true);
     }
 
     stop() {
       window.removeEventListener("paste", this._onPaste, true);
       window.removeEventListener("change", this._onChange, true);
+      window.removeEventListener("drop", this._onDrop, true);
     }
 
     /**
@@ -181,7 +189,95 @@
     }
 
     // =================================================================
-    // Path 2 — choosing a file
+    // Path 2 — dragging a file onto the page
+    // =================================================================
+
+    /**
+     * A file dropped onto the composer.
+     *
+     * This path was MISSING, and its absence was a complete bypass of
+     * everything: drag a document onto ChatGPT and no listener fired,
+     * so no analysis ran and nothing was held. Not a weakness in
+     * detection — an input nobody was watching.
+     *
+     * It was found by a user attaching a PDF containing an AWS key and
+     * reporting that it went through. The backend blocked that exact
+     * file, correctly, at score 92, when asked. Nothing ever asked it.
+     *
+     * Worth recording how it hid for so long: `paste` and `change` are
+     * the two paths you think of when you picture attaching a file,
+     * and both were covered and tested. Dragging is the one people
+     * actually do with a file that is already sitting on their desktop
+     * — which is precisely the case where the file is a document
+     * rather than a screenshot.
+     *
+     * @private
+     */
+    async #onDrop(event) {
+      if (!this.enabled) return;
+
+      const files = this.#inspectableIn(event.dataTransfer);
+      if (files.length === 0) return; // dragged text or a link, not ours
+
+      this.stats.seen++;
+
+      if (files.every((file) => this.approved.has(file))) {
+        this.stats.passed++;
+        console.debug(`${TAG} drop passed through — already approved`);
+        return;
+      }
+
+      // `drop` IS cancellable, like `paste` and unlike `change`, so
+      // this is the clean path: the page never learns a file arrived.
+      event.preventDefault();
+      event.stopImmediatePropagation();
+
+      this.stats.intercepted++;
+
+      console.log(
+        `%c ${TAG} ATTACHMENT HELD `,
+        "background:#8a4b00; color:#fff; padding:2px 6px; border-radius:3px;",
+        `${files.length} file(s) via drop`
+      );
+
+      for (const file of files) {
+        const allowed = await this.onIntercept(file, { trigger: "drop" });
+
+        if (allowed) this.#replayDrop(file, event.target, event);
+      }
+    }
+
+    /**
+     * Put an approved file back, as if the user had just dropped it.
+     *
+     * @private
+     */
+    #replayDrop(file, target, original) {
+      this.approved.add(file);
+
+      const transfer = new DataTransfer();
+      transfer.items.add(file);
+
+      // The coordinates are carried over from the original event.
+      // Some editors decide WHERE a dropped file lands from clientX/Y,
+      // and a replay at (0, 0) would drop it in the wrong place — or
+      // outside the drop zone entirely, which reads to the user as the
+      // file having been silently eaten.
+      const replay = new DragEvent("drop", {
+        dataTransfer: transfer,
+        bubbles: true,
+        cancelable: true,
+        clientX: original?.clientX ?? 0,
+        clientY: original?.clientY ?? 0,
+      });
+
+      (target ?? document.body).dispatchEvent(replay);
+
+      console.log(`${TAG} approved file re-dropped (${file.name || "file"})`);
+    }
+
+    // =================================================================
+    // Path 3 — choosing a file
     // =================================================================
 
     /** @private */

@@ -1602,3 +1602,47 @@ a test suite only knows the combinations someone thought to write.
 **Naming.** `ImageInterceptor` became `AttachmentInterceptor` in the same change. A class that
 intercepts PDFs while calling itself an image interceptor is a comment that has started lying, and
 this codebase is not worth much if its names cannot be trusted.
+
+---
+
+## D54 — The input nobody was watching
+
+**Context.** A user built a PDF containing an AWS access key, attached it to ChatGPT, and reported
+that it went straight through. Asked directly, the backend **blocked that exact file at score 92**.
+
+Nothing ever asked it.
+
+**Cause.** `AttachmentInterceptor` listened on `paste` and `change`. Dragging a file from the
+desktop onto the composer fires **neither** — it fires `drop`, and there was no listener. So the
+file was never held, never uploaded for analysis, and never mentioned. A total bypass of Stages
+1–4, for images as much as for documents.
+
+**Why it survived seven weeks of work and 78 passing tests.** `paste` and `change` are the two
+paths you picture when you imagine attaching a file: Cmd+V a screenshot, or click the + button.
+Both were covered from the week the image path was built, and both were tested thoroughly. **Drag
+is what people actually do with a file that is already sitting on their desktop** — which is
+precisely the case where the file is a *document* rather than a screenshot, and therefore precisely
+the case this project most wanted to catch.
+
+The tests were not weak. They tested the two paths that had been thought of.
+
+**Fixed** with a capture-phase `drop` listener, handled like `paste` rather than like `change`
+because `drop` is cancellable: `preventDefault()` means the page never learns a file arrived. The
+replay carries `clientX`/`clientY` from the original event, because some editors decide where a
+dropped file lands from the coordinates, and a replay at the origin would drop it outside the drop
+zone — which a user reads as the file having been silently eaten.
+
+**JSDOM does not implement `DragEvent`,** so the harness now shims it alongside the existing
+`ClipboardEvent` and `<dialog>` shims. Without it the drop path would be real code that only ever
+executes in a browser nobody is watching — which is how it came to be missing in the first place.
+
+**The lesson, stated plainly because it keeps recurring.** This is the fourth defect found by a
+person using the system rather than by the test suite or the corpus, after the credential gap
+(D46), the marker vocabulary (D48) and the Aadhaar/phone collision (D51). Every one of them was
+invisible to a suite that passed completely.
+
+A test suite answers *"does the code do what I thought?"*. It cannot answer *"did I think of
+everything?"*. For an **enumerated attack surface** — the ways a file can enter a page — that
+second question is the one that decides whether the tool works, and the only reliable way to ask it
+is to enumerate the surface deliberately and in writing, rather than to notice paths as they occur
+to you. The three entry points are now named at the top of the module for exactly that reason.
