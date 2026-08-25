@@ -1646,3 +1646,69 @@ everything?"*. For an **enumerated attack surface** — the ways a file can ente
 second question is the one that decides whether the tool works, and the only reliable way to ask it
 is to enumerate the surface deliberately and in writing, rather than to notice paths as they occur
 to you. The three entry points are now named at the top of the module for exactly that reason.
+
+---
+
+## D55 — A lowercase name is admitted when something calls it a data subject
+
+**Context.** Stage 2 rejected any `PERSON` span with no capital letter. That rule exists for a real
+defect: on *"kyc document shows aadhaar ..."* spaCy labels `kyc` as a `PERSON` at **0.85
+confidence** — far too high for a score threshold to filter — because a short lowercase token in
+that sentence position genuinely looks like a name to the model. Requiring one uppercase letter
+removes the entire class in a single line, and it is a fact about English rather than a tweak
+fitted to one sample.
+
+**The cost, found the way these things keep being found.** A user asked why *"john is from Utah"*
+was not flagged. It exposed two separate things, and only one was a defect:
+
+- *"john is from Utah"* scores **20** against a warn threshold of 25 **even when capitalised**, and
+  that is correct. A name beside a place is a sentence *about* a person, not a record. Flagging it
+  would flag half of ordinary English.
+- But `customer john, phone 801-555-0142` **is** a customer record, and the capitalisation rule was
+  discarding the only signal that said so.
+
+**Chosen:** a lowercase span is admitted when a **data-subject marker** sits beside it — `customer`,
+`patient`, `claimant`, `employee`, the same 89-word vocabulary the risk engine uses ([D48](#d48--the-marker-vocabulary-was-written-from-one-departments-language)).
+
+This is not a loosening of the capitalisation rule so much as a **second, independent reason** to
+believe the span is a name: something in the sentence is explicitly framing a person as the subject
+of a record.
+
+**The objection that looks fatal, and is not.** `kyc` is *itself* one of those markers, so this
+appears to re-admit the exact bug. It does not, because `context_window` **excludes the span being
+judged**:
+
+| Span | Window | Verdict |
+|---|---|---|
+| `kyc` in *"kyc document shows aadhaar ..."* | `document shows aadhaar ...` | no marker → **rejected** |
+| `john` in *"kyc for john, ..."* | `kyc for ...` | marker → **admitted** |
+
+**A finding may never supply its own justification** — the same property D29's context gates depend
+on, reused here rather than reinvented.
+
+**The follow-on case, which only appeared on measurement.** spaCy sometimes tags *"patient priya"*
+as a single `PERSON` span rather than tagging `priya` and leaving `patient` alone. The marker is
+then *inside* the span, the window correctly excludes it, and a patient's name beside a phone
+number scored **6**. So a span containing a marker **plus a residual** is admitted, on the grounds
+that the residual is the name — while a span that is **only** a marker is still refused, which is
+what keeps `kyc` out.
+
+**Measured: no regression.** Recall **98.3%**, false-positive rate **0%**, F1 **99.1%**, `PERSON`
+precision **77.8%** — every figure bit-for-bit identical to the run before the change. The corpus
+contains no lowercase-name samples, so it could neither find this gap nor confirm the repair; what
+it *can* do is prove the fix cost nothing, which is the question that decides whether it ships.
+
+**Layering, bent deliberately.** This is the only place a detector imports from `core`. The
+vocabulary is 89 words and grew by ~45 in one change; a second copy inside the detector would be
+correct on the day it was written and wrong within a month. `policy.py` is data rather than logic,
+and the rule it bends exists to keep I/O and HTTP out of detectors, not to forbid a shared
+constant.
+
+**Still true, and still a limitation.** A lowercase name with no marker anywhere near it is missed,
+and the whole approach assumes a script that has capital letters at all. A test pins that
+behaviour, so relaxing it later has to be a decision rather than an accident.
+
+**Stage 2 had no unit-test file until this change.** It was covered only through the corpus and the
+endpoint tests, both of which measure whether the *system* behaves. Neither pinned the judgements
+inside the module — the rule rejecting `kyc` had no test naming it and could have been deleted
+silently.

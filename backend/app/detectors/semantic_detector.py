@@ -49,9 +49,11 @@ engine once as a lazy singleton rather than per request.
 """
 
 import logging
+import re
 import threading
 
-from .base import Finding
+from ..core.policy import DATA_SUBJECT_MARKERS
+from .base import Finding, context_window
 
 DETECTOR_NAME = "presidio"
 
@@ -155,24 +157,97 @@ def _get_engine():
     return _engine
 
 
-def _looks_like_a_name(span: str) -> bool:
-    """Reject spaCy's lowercase PERSON guesses.
+# How far to look for a marker beside a lowercase candidate.
+#
+# Mirrors `RiskPolicy.context_radius`, which uses the same vocabulary
+# to answer a closely related question. Not read from the policy
+# object, because a detector takes no policy — a rule that changes what
+# gets DETECTED belongs to the detector, while the policy governs what
+# a finding is then WORTH.
+NAME_CONTEXT_RADIUS = 60
+
+# The vocabulary is imported rather than restated. It is 89 words and
+# it grew by ~45 in one change (D48); a second copy here would be
+# correct on the day it was written and wrong within a month.
+#
+# This is the only place a detector reads from `core`, and it is a
+# deliberate exception: `policy.py` is data, not logic, and the
+# layering rule it bends exists to keep I/O and HTTP out of detectors,
+# not to forbid a shared constant. Purity and testability are
+# untouched.
+_MARKER_PATTERN = re.compile(
+    r"\b(?:" + "|".join(re.escape(word) for word in DATA_SUBJECT_MARKERS) + r")\b",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_a_name(span: str, text: str, start: int, end: int) -> bool:
+    """Decide whether a PERSON span is a name or noise.
 
     On "kyc document shows aadhaar ..." spaCy labels `kyc` as a PERSON
     at 0.85 confidence — high enough that no score threshold helps.
     The model is pattern-matching on sentence position, and short
     lowercase acronyms in that position genuinely look like names to it.
 
-    English proper nouns are capitalised. That single rule removes the
-    entire class, and it is a fact about the language rather than a
-    tweak fitted to one sample.
+    English proper nouns are capitalised, so requiring one uppercase
+    letter removes that entire class in a single rule — a fact about
+    the language rather than a tweak fitted to one sample.
 
-    Known limitation, worth stating in the report: it also rejects
-    correctly-lowercased names in languages without capitalisation,
-    and names typed in all-lowercase by a hurried user. Detection here
-    is English-centric already.
+    ---- The exception, and why it is safe ------------------------
+
+    The capitalisation rule had a cost that a user found immediately:
+    type your own name in lowercase and you stop being a person.
+    `customer john, phone 801-555-0142` is a customer record, and the
+    filter was throwing away the only signal that said so.
+
+    So a lowercase span is admitted when a DATA-SUBJECT MARKER sits
+    beside it — `customer`, `patient`, `claimant`, `employee`. That is
+    not a loosening of the rule so much as a second, independent reason
+    to believe the span is a name: something in the sentence is
+    explicitly framing a person as the subject of a record.
+
+    The obvious objection is that `kyc` is ITSELF one of those markers,
+    so this looks like it re-admits the exact bug. It does not, because
+    `context_window` EXCLUDES the span being judged. Asked about `kyc`
+    in "kyc document shows aadhaar ...", the window is "document shows
+    aadhaar ..." and contains no marker, so the span stays rejected.
+    Asked about `john` in "kyc for john", the window contains `kyc` and
+    the span is admitted. A finding may never supply its own
+    justification — the same property D29's context gates depend on.
+
+    Known limitation, still true and worth stating in the report: a
+    lowercase name with no marker anywhere near it is still missed, and
+    the whole approach assumes a script that has capital letters at
+    all. Detection here is English-centric already.
     """
-    return any(c.isupper() for c in span) and len(span.strip()) >= 2
+    if len(span.strip()) < 2:
+        return False
+
+    if any(c.isupper() for c in span):
+        return True
+
+    window = context_window(text, start, end, NAME_CONTEXT_RADIUS)
+
+    if _MARKER_PATTERN.search(window):
+        return True
+
+    # ---- The marker swallowed by the span ------------------------
+    # spaCy sometimes labels "patient priya" as one PERSON rather than
+    # tagging `priya` and leaving `patient` alone. The marker is then
+    # INSIDE the span, `context_window` correctly excludes it, and a
+    # patient's name beside a phone number scored 6 and was allowed.
+    #
+    # A span is still not permitted to justify itself, which is what
+    # keeps `kyc` rejected: a span that is ONLY a marker contains no
+    # name and is refused. But a marker followed by something else
+    # means the something else is the name, and that residual — not the
+    # marker — is what is being admitted.
+    match = _MARKER_PATTERN.search(span)
+    if match:
+        residual = (span[: match.start()] + span[match.end():]).strip(" ,.:;-")
+        return len(residual) >= 2
+
+    return False
 
 
 def scan(text: str) -> list[Finding]:
@@ -203,7 +278,9 @@ def scan(text: str) -> list[Finding]:
     for result in results:
         span = text[result.start : result.end]
 
-        if result.entity_type == "PERSON" and not _looks_like_a_name(span):
+        if result.entity_type == "PERSON" and not _looks_like_a_name(
+            span, text, result.start, result.end
+        ):
             continue
 
         findings.append(
