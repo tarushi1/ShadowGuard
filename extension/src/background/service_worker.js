@@ -250,6 +250,27 @@ chrome.runtime.onInstalled.addListener((details) => {
  * @param {function} sendResponse  Callback that returns a value to the sender.
  * @returns {boolean} true to keep the response channel open for async work.
  */
+/**
+ * A stable key for "the chat this message belongs to".
+ *
+ * The tab id, and nothing else. Considered and rejected: hashing the
+ * chat URL, which is more precise — a user switching between two chats
+ * in one tab shares a key under this scheme — but requires the page to
+ * hand us its URL and puts a value derived from the conversation's
+ * identity on the wire. Sharing a key across chats in one tab is a
+ * false-POSITIVE risk bounded by a five-minute expiry; the alternative
+ * widens what is transmitted, which is the thing this project is least
+ * willing to trade.
+ *
+ * Returns null when there is no tab, so the backend simply treats the
+ * message as unprimed rather than grouping stray requests together.
+ */
+function conversationKey(sender) {
+  const id = sender?.tab?.id;
+  return typeof id === "number" ? `tab-${id}` : null;
+}
+
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // `sender` is populated by Chrome itself, not by the content script,
   // so it cannot be spoofed by a malicious page. That makes it the
@@ -300,9 +321,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // has no access to chrome.storage, and identity is a property of
       // the installation rather than of one tab. Stamping it here keeps
       // it consistent across every tab and every conversation.
+      //
+      // The conversation key is stamped here for a STRONGER reason.
+      // The backend carries context words between messages that share
+      // one (D56), so a key the page could choose would let a hostile
+      // site read another conversation's priming state by guessing it.
+      // `sender.tab.id` is populated by Chrome, cannot be set by the
+      // page, and never leaves this worker as anything but an integer
+      // — no chat URL and no chat title is ever sent.
       (async () => {
         const userId = await getUserId();
-        const result = await requestAnalysis({ ...message.payload, user_id: userId });
+        const result = await requestAnalysis({
+          ...message.payload,
+          user_id: userId,
+          conversation_id: conversationKey(sender),
+        });
         sendResponse(result);
       })();
 

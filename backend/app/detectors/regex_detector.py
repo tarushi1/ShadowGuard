@@ -692,7 +692,191 @@ _CONTEXT_PATTERNS: dict[int, re.Pattern] = {
 }
 
 
-def has_supporting_context(text: str, start: int, end: int, rule: "Rule") -> bool:
+# ---------------------------------------------------------------
+# Conversation priming
+# ---------------------------------------------------------------
+# The closed vocabulary that may be carried between messages.
+#
+# CLOSED is the load-bearing word. `core/conversation.py` remembers
+# which of THESE words a message mentioned and nothing else, so free
+# text can never enter that store — there is no code path that looks up
+# anything outside these lists. That is what lets a stateful feature sit
+# inside a system that promises to retain no message content.
+_VOCABULARY = tuple(
+    sorted(
+        {word for rule in RULES for word in rule.context_words}
+        | set(_LABELS_STRONG)
+        | set(_LABELS_WEAK)
+    )
+)
+
+_VOCABULARY_PATTERN = re.compile(
+    r"\b(?:" + _alternation(_VOCABULARY) + r")\b", re.IGNORECASE
+)
+
+# Labels that specifically announce a CREDENTIAL, as opposed to any
+# context word. Priming on `phone` should not make a bare token look
+# like a password.
+_CREDENTIAL_VOCABULARY = frozenset(_LABELS_STRONG + _LABELS_WEAK)
+
+# A primed message must be SHORT to be read as a bare credential.
+#
+# The pattern being modelled is the follow-up message that is just the
+# secret: "hunter2Fake", or "here it is: hunter2Fake". A paragraph is
+# something else, and treating every credential-shaped token inside one
+# as a password would turn a narrow fix into a false-positive machine.
+PRIMED_CREDENTIAL_MAX_TOKENS = 8
+
+# Lower than either in-message PASSWORD rule (0.75 and 0.7).
+#
+# The evidence is genuinely weaker: the label and the value were never
+# seen together, and the link between them is an assumption about how
+# the conversation flows. Scoring it the same would claim a certainty
+# that is not there.
+PRIMED_CREDENTIAL_CONFIDENCE = 0.6
+
+
+def context_vocabulary_in(text: str) -> frozenset[str]:
+    """Which known context words this message mentioned.
+
+    The only thing `core/conversation.py` is ever given. Returns
+    normalised lowercase forms so `API Key` and `api  key` become the
+    same entry a rule's `context_words` can be compared against.
+    """
+    return frozenset(
+        re.sub(r"\s+", " ", match.group(0).lower())
+        for match in _VOCABULARY_PATTERN.finditer(text)
+    )
+
+
+# Tokens that are obviously something else, measured rather than guessed.
+#
+# The first version of the bare-credential rule reused
+# `looks_credential_shaped`, which accepts a digit OR mixed case. On ten
+# ordinary follow-up messages it produced TWO false alarms — `Chrome`
+# from "try Chrome 141 instead" and `report2024.pdf` from "the file is
+# report2024.pdf". A 20% false-alarm rate on benign text would have made
+# the feature worse than the gap it closes, since a warning people learn
+# to dismiss protects nothing.
+_FILENAME_LIKE = re.compile(r"\.[A-Za-z]{1,5}$")
+_URLISH = re.compile(r"^[a-z]+://|^www\.|/", re.IGNORECASE)
+
+
+def _looks_like_a_bare_credential(value: str) -> bool:
+    """A stricter shape test than `looks_credential_shaped`.
+
+    Stricter because it has less to work with. The in-message rules see
+    a LABEL beside the value, so a weak shape test is enough — the label
+    is carrying the claim. Here the label is a message away, so the
+    shape has to carry it alone.
+
+    Both a letter AND a digit, rather than either. That single change
+    removes `Chrome`, `Firefox`, `Windows` and every other capitalised
+    ordinary word, at the cost of all-alphabetic passwords — which
+    `looks_like_a_real_password` was already unable to distinguish from
+    prose anyway.
+    """
+    # A range, not a floor. Below 6 it is a word; above 32 it is not
+    # something a human typed — it is a git SHA, an npm integrity hash,
+    # a docker digest or a trace id, and every one of those appeared in
+    # the benign corpus. Long generated tokens already belong to the
+    # ENTROPY stage, which runs on every message and is far better at
+    # judging them. Claiming them here would be a second detector
+    # answering a question that already has an owner.
+    if not 6 <= len(value) <= 32:
+        return False
+
+    # Syntax characters. `r=t||0` came out of a line of minified
+    # JavaScript in the benign corpus; assignment and grouping
+    # characters mark code, and a typed password does not contain them.
+    if any(c in value for c in "=|(){}<>"):
+        return False
+
+    if _FILENAME_LIKE.search(value) or _URLISH.search(value):
+        return False
+
+    # No dots or slashes at all. Versions (`python3.12`), hostnames and
+    # paths all carry them and passwords rarely do, so the trade is
+    # cheap. `python3.12 is installed` was a false alarm without this.
+    if any(c in value for c in "./\\"):
+        return False
+
+    # A LOWERCASE letter and a digit, not merely a letter and a digit.
+    # Reference codes are the reason: `ENG-4471`, `INV-2024`, `PR-1183`
+    # are letter-plus-digit and are not credentials. Requiring lowercase
+    # removes that whole family, and the cost — an all-uppercase
+    # password sent bare with no label — is a narrow case to give up in
+    # exchange for not crying wolf on every ticket number.
+    return any(c.isdigit() for c in value) and any(c.islower() for c in value)
+
+
+def _scan_primed_credentials(text: str, primed: frozenset[str]) -> list[Finding]:
+    """Read a short message as a bare credential, when one was announced.
+
+    This is the case the whole feature exists for:
+
+        "I'm going to paste my password"
+        "hunter2Fake"
+
+    The PASSWORD rules embed the label in their pattern, so neither can
+    fire on the second message — there is no label to match. Satisfying
+    a context gate does not help either, because the gate is not what is
+    missing. The only thing that works is a rule that looks for a bare
+    credential, and that rule is far too broad to run unconditionally:
+    without the announcement it would report a token from every short
+    message anybody sends.
+
+    Three bounds keep it narrow: the conversation must have mentioned a
+    CREDENTIAL label specifically, the message must be short, and the
+    token must still look generated rather than typed.
+    """
+    if not (primed & _CREDENTIAL_VOCABULARY):
+        return []
+
+    if len(text.split()) > PRIMED_CREDENTIAL_MAX_TOKENS:
+        return []
+
+    findings: list[Finding] = []
+
+    # Maximal runs, deliberately UNBOUNDED here, with the length test
+    # applied afterwards in `_looks_like_a_bare_credential`.
+    #
+    # A capped quantifier looked equivalent and was not: a 71-character
+    # docker digest exceeded the cap, matched its first 64 characters,
+    # and left a 7-character tail that was then judged on its own merits
+    # and reported as a password. Splitting a token you are about to
+    # reject for being too long is how a length limit becomes a way
+    # around itself.
+    for match in re.finditer(r"""[^\s"'`,;]+""", text):
+        value = match.group(0)
+
+        if not looks_like_a_real_password(value):
+            continue
+        if not _looks_like_a_bare_credential(value):
+            continue
+
+        findings.append(
+            Finding(
+                type="PASSWORD",
+                start=match.start(),
+                end=match.end(),
+                score=PRIMED_CREDENTIAL_CONFIDENCE,
+                detector=DETECTOR_NAME,
+                severity="high",
+                value=value,
+            )
+        )
+
+    return findings
+
+
+def has_supporting_context(
+    text: str,
+    start: int,
+    end: int,
+    rule: "Rule",
+    primed: frozenset[str] = frozenset(),
+) -> bool:
     """Does a supporting word appear near this match?
 
     The match itself is EXCLUDED from the searched window, and that is
@@ -710,21 +894,37 @@ def has_supporting_context(text: str, start: int, end: int, rule: "Rule") -> boo
     if pattern is None:  # ungated rule — nothing to satisfy
         return True
 
-    return pattern.search(context_window(text, start, end, _CONTEXT_WINDOW)) is not None
+    if pattern.search(context_window(text, start, end, _CONTEXT_WINDOW)) is not None:
+        return True
+
+    # The supporting word may have arrived in an EARLIER message.
+    #
+    # "here is my aadhaar" followed by a bare twelve-digit number is one
+    # disclosure typed across two lines, and the gate exists to
+    # distinguish a real disclosure from a coincidental digit run — a
+    # question the previous message answers perfectly well.
+    #
+    # `primed` is empty on every path except a live conversation, so the
+    # evaluation harness and every existing caller are unaffected.
+    return bool(primed & set(rule.context_words))
 
 
 # ---------------------------------------------------------------
 # Scanning
 # ---------------------------------------------------------------
 
-def scan(text: str) -> list[Finding]:
+def scan(text: str, primed: frozenset[str] = frozenset()) -> list[Finding]:
     """Run every rule over `text` and return de-duplicated findings.
 
-    A pure function: no I/O, no HTTP, no global state. That is what
-    lets the evaluation harness call it directly, hundreds of times,
-    in milliseconds.
+    Still a pure function: `primed` is passed in rather than looked up,
+    so this performs no I/O and holds no state of its own. The default
+    is empty, which means the evaluation harness and every existing
+    caller behave exactly as before — the corpus numbers stay a claim
+    about single-message detection.
 
     :param text: the content to inspect
+    :param primed: context words carried from earlier messages in the
+        same conversation, drawn only from the closed vocabulary above
     :returns: findings sorted by position, with overlaps resolved
     """
     findings: list[Finding] = []
@@ -750,7 +950,7 @@ def scan(text: str) -> list[Finding]:
             # different questions, so two separate gates — a valid PAN
             # quoted as an example format is well-formed and still not
             # a disclosure.
-            if not has_supporting_context(text, start, end, rule):
+            if not has_supporting_context(text, start, end, rule, primed):
                 continue
 
             findings.append(
@@ -764,5 +964,7 @@ def scan(text: str) -> list[Finding]:
                     value=value,
                 )
             )
+
+    findings.extend(_scan_primed_credentials(text, primed))
 
     return resolve_overlaps(findings)

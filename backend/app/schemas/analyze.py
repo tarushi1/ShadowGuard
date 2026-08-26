@@ -147,6 +147,19 @@ class AnalyzeRequest(BaseModel):
         description="How the send was attempted: enter-key, send-button, form-submit.",
     )
 
+    conversation_id: str | None = Field(
+        default=None,
+        max_length=64,
+        description=(
+            "Opaque key for the chat this message belongs to, used to carry "
+            "context words between messages (D56). Set by the SERVICE WORKER "
+            "from Chrome's tab id, never by the page: a conversation key the "
+            "content script could choose would let a hostile page read another "
+            "conversation's priming state by guessing its key. No chat URL or "
+            "title is ever sent."
+        ),
+    )
+
     client_version: str | None = Field(
         default=None,
         max_length=32,

@@ -27,7 +27,7 @@ import time
 import uuid
 from dataclasses import dataclass
 
-from ..core import behaviour, redactor, risk
+from ..core import behaviour, conversation, redactor, risk
 from ..core.policy import DEFAULT_POLICY, RiskPolicy
 from ..detectors import entropy_detector, ocr, pdf, regex_detector, semantic_detector
 from ..detectors.base import Finding, highest_severity, resolve_overlaps
@@ -66,6 +66,7 @@ def run_stages(
     use_semantic: bool = True,
     policy: RiskPolicy = DEFAULT_POLICY,
     behaviour=None,
+    primed: frozenset[str] = frozenset(),
 ) -> StageResult:
     """Run the detection stages and fuse them into a verdict.
 
@@ -85,13 +86,17 @@ def run_stages(
     :param use_semantic: run Stage 2 (Presidio NER)
     :param policy: risk-scoring opinions; the harness varies this to
         report what a threshold change would actually cost
+    :param primed: context words carried from earlier messages in the
+        same conversation. Empty on every path except a live request,
+        so the corpus keeps measuring single-message detection — the
+        same discipline D49 applies to the behavioural signal
     """
     stages_run: list[str] = ["regex"]
 
     # ---- Stage 1a: pattern detection ----------------------------
     # Sub-millisecond and near-perfect on structured secrets, so it
     # always runs first.
-    findings: list[Finding] = regex_detector.scan(text)
+    findings: list[Finding] = regex_detector.scan(text, primed)
 
     # ---- Short-circuit ------------------------------------------
     # A critical regex hit is already certain and already blocking.
@@ -203,7 +208,17 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
     # A first pass without behaviour tells us what was found; the
     # signal then depends on those entity types, so the fusion runs
     # twice. Cheap, because no detector runs the second time.
-    preliminary = run_stages(request.text)
+    # ---- Conversation priming -----------------------------------
+    # Context words carried from earlier messages in this conversation.
+    # Read BEFORE analysis and recorded AFTER it, so a message can
+    # never prime itself — the same rule the Stage 1 gates follow by
+    # excluding a match from its own context window (D29).
+    #
+    # `take` rather than a getter: reading spends one of the three
+    # messages a mention supports.
+    primed = conversation.take(request.conversation_id)
+
+    preliminary = run_stages(request.text, primed=primed)
 
     signal = behaviour.signal_for(
         request.user_id,
@@ -214,7 +229,15 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
     result = (
         preliminary
         if signal.is_neutral
-        else run_stages(request.text, behaviour=signal)
+        else run_stages(request.text, behaviour=signal, primed=primed)
+    )
+
+    # Recorded after the verdict is settled. Only words from the closed
+    # vocabulary in `regex_detector` ever reach the store — never the
+    # message, and never a fragment of it.
+    conversation.note(
+        request.conversation_id,
+        regex_detector.context_vocabulary_in(request.text),
     )
     action, level, score = result.action, result.level, result.score
     findings, stages_run = result.findings, result.stages_run

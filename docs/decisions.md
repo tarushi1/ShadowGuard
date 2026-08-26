@@ -1712,3 +1712,96 @@ behaviour, so relaxing it later has to be a decision rather than an accident.
 endpoint tests, both of which measure whether the *system* behaves. Neither pinned the judgements
 inside the module — the rule rejecting `kyc` had no test naming it and could have been deleted
 silently.
+
+---
+
+## D56 — Context that arrived in an earlier message
+
+**Context.** A user described how people actually type:
+
+```
+"I'm going to paste my password so you can see the format"
+"hunter2Fake"
+```
+
+Every detector in the system sees **one message**. The second has no label beside it, the PASSWORD
+rules require the label and the value together, and the message went through at score **0**.
+
+This is the most practical hole the system has had, and the reason is not that it is clever. It is
+that **nobody has to be attacking anything.** Every other bypass in `security.md` requires someone
+to try. This one is just how conversations work.
+
+**Why the system was stateless — which is the interesting part.** Not an oversight. ShadowGuard
+promises that no message content is retained (D11, D41); the schema has no column that *can* hold a
+prompt. But to know that message 2 primed message 3, something must remember message 2 when message
+3 arrives — and that is retention of exactly the thing the project promises not to retain.
+
+**The detection gap and the privacy guarantee are the same design decision seen from two sides.**
+
+**Chosen:** remember not the message but **which words from a closed vocabulary** it mentioned.
+
+`password`, `aadhaar`, `api key` — the same 71 context words the Stage 1 gates already use. Free
+text cannot enter the store because no code path looks up anything outside those lists. In memory
+only, never written to disk, expiring after **5 minutes** or **3 messages**, whichever comes first,
+and capped at 500 conversations with LRU eviction.
+
+**Why this is not Stage 4.** Stage 4 produces a multiplier and never a finding (D49), and that works
+because it modulates evidence that already exists. It cannot work here: `hunter2Fake` scores **zero**,
+and zero times any multiplier is still zero. Priming has to let a detector **fire** that otherwise
+could not, so it belongs at the detector layer as an extra source of context, not at the risk layer
+as an amplifier.
+
+**Two mechanisms, and only one of them was obvious.**
+
+| Mechanism | What it fixes |
+|---|---|
+| A primed word satisfies a **context gate** | `here is my aadhaar` → `2345 6789 0123`. The gate asks "is this digit run being used as an identifier?", and the previous message answers it. Reuses D29 unchanged |
+| A **bare-credential rule**, primed only | The PASSWORD rules embed the label in the pattern, so no gate is what is missing — there is no label to match. Only a rule looking for a bare credential works, and that rule is far too broad to run unconditionally |
+
+**The bare-credential rule was a false-positive machine, and measurement is the only reason it is
+not.** The first version reused `looks_credential_shaped`, which accepts a digit *or* mixed case. On
+ten ordinary follow-ups it produced **two** false alarms: `Chrome` from *"try Chrome 141 instead"*
+and `report2024.pdf`. Rather than fit rules to my own invented examples, it was measured against the
+**115 real benign corpus samples**, every one artificially primed:
+
+| Version | New false alarms |
+|---|---|
+| `looks_credential_shaped` | 20% (on 10 hand-written samples) |
+| + lowercase-and-digit required, no dots or slashes | **4.3%** (5 / 115) |
+| + length 6–32, no syntax characters | **0.9%** (1 / 115) |
+| + unbounded tokenisation | **0 / 115** |
+
+Each bound has a reason that is not "it fixed my sample":
+
+- **Lowercase *and* a digit**, not merely a letter and a digit — reference codes (`ENG-4471`,
+  `INV-2024`) are letter-plus-digit and are not credentials. The cost is an all-uppercase password
+  sent bare, which is narrow.
+- **Length 6–32.** Above 32 it is a git SHA, an npm integrity hash, a docker digest or a trace id —
+  all four appeared in the benign corpus. Machine-generated tokens **already belong to the entropy
+  stage**; claiming them here would be a second detector answering a question that has an owner.
+- **Unbounded tokenisation.** The capped quantifier `{5,64}` looked equivalent and was not: a
+  71-character docker digest exceeded the cap, matched its first 64 characters, and left a
+  7-character tail that was judged on its own merits and reported as a password. **Splitting a token
+  you are about to reject for being too long is how a length limit becomes a way around itself.**
+
+**Measured: no regression.** Recall **98.3%**, FPR **0%**, F1 **99.1%** — identical, because
+`run_stages` defaults to unprimed and the corpus is a set of isolated messages. The discipline is
+the one D49 established: the measured numbers stay a claim about **single-message content
+detection**, and a stateful feature must not quietly redefine what they mean.
+
+**The conversation key is stamped by the service worker, never by the page.** `sender.tab.id` is
+populated by Chrome and cannot be set by a content script. That matters more than it looks: the
+backend carries context between messages sharing a key, so a key the page could choose would let a
+hostile site **read another conversation's priming state by guessing it**. No chat URL and no chat
+title is ever transmitted.
+
+Hashing the chat URL was considered and rejected. It is more precise — under the tab scheme, a user
+switching between two chats in one tab shares a key — but it requires the page to hand over its URL
+and puts a value derived from the conversation's identity on the wire. Sharing a key across chats in
+one tab is a false-**positive** risk bounded by a five-minute expiry; the alternative widens what is
+transmitted, which is the thing this project is least willing to trade.
+
+**What is still open, stated rather than discovered.** A secret split *within* itself — half in one
+message, half in the next — is not caught by any of this, and neither is a disclosure whose
+announcement used words outside the vocabulary (*"here's the thing I mentioned"*). Both are
+[B19](security.md).
