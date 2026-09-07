@@ -152,6 +152,59 @@ and applies the fail-open-visibly policy ([D12](decisions.md#d12--fail-open-but-
 
 ---
 
+## `POST /api/v1/analyze/image` · `POST /api/v1/analyze/pdf`
+
+`multipart/form-data`, not JSON. Separate endpoints rather than a `kind` field on `/analyze`,
+because the three differ in size limit, validation and failure mode — a schema whose text field
+caps at 100k characters while a sibling routinely carries megabytes has stopped describing
+anything.
+
+| Field | |
+|---|---|
+| `file` | the upload. **8 MB** for images, **20 MB** for PDFs |
+| `user_id`, `platform`, `trigger`, `client_version` | as for `/analyze` |
+
+The response is the same `AnalyzeResponse`, with one extra object:
+
+| | Present when | Carries |
+|---|---|---|
+| `ocr` | input was an image | characters, words, mean confidence, dimensions |
+| `pdf` | input was a PDF | characters, pages, pages read, `has_text_layer`, `truncated`, `encrypted`, `sources` |
+
+**`has_text_layer` is the field that carries weight.** `false` means the document was a scan and
+nothing could be read — an absence of evidence, not evidence of absence. Both a clean document and
+an unreadable one return `allow`, so a client that treats them alike turns "print it, scan it,
+attach it" into a one-step bypass. The extension shows an explicit *"this has NOT been checked"*
+dialog for the second case, and only when the action is `allow` — a document that was partly read
+and **blocked** must be reported as blocked.
+
+`sources` lists which of the five channels yielded text: `pages`, `metadata`, `annotations`,
+`forms`. Kept because it is the only way to answer "is reading annotations worth the code?" with
+data rather than intuition.
+
+| Status | When |
+|---|---|
+| `413` | Upload exceeds the size limit for its type |
+| `422` | Empty upload, or a file the parser could not read |
+| `503` | Tesseract or the PDF backend is not installed. **Not a 500** — the service is fine, one capability is unavailable, and the distinction tells an operator to install a package rather than read a stack trace |
+
+---
+
+## Conversation context
+
+`analyze` accepts an optional **`conversation_id`** (≤ 64 chars). Messages sharing one have
+context words carried between them for 5 minutes or 3 messages, so a disclosure split across two
+messages is still detected ([D56](decisions.md)).
+
+**Set by the service worker, never by the page.** It is `tab-<sender.tab.id>`, which Chrome
+populates and a content script cannot forge. A conversation key the page could choose would let a
+hostile site read another conversation's priming state by guessing it. No chat URL or title is
+ever transmitted, and only words from a fixed 71-word vocabulary are ever retained.
+
+Omit it and the message is simply analysed unprimed.
+
+---
+
 ## Client behaviour
 
 | Situation | Extension does |

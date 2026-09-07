@@ -20,6 +20,10 @@ pytest -q        # backend: detectors, risk engine, redaction, persistence, API 
 npm test         # extension: adapters, interceptors, modal, cross-language contracts
 ```
 
+Currently **369 backend** and **82 extension** tests. Both numbers are in the README status table
+and should be corrected there whenever they move — a stale count is the first sign a document has
+stopped being maintained.
+
 Both, every time. They cover different halves and neither can see the other's failures — the two
 worst bugs in this project so far were in the half that had no tests at all
 ([D38](decisions.md), [D39](decisions.md)).
@@ -117,6 +121,14 @@ Backend must be running for rows 1–5.
 | 28 | Attach the same screenshot via the **+ button** | Same verdict, `trigger: file-input`. The file picker's selection is discarded |
 | 29 | Paste ordinary **text** while the extension is loaded | Pastes normally. Breaking this breaks copy-paste for the whole site |
 | 30 | Stop the backend, paste an image | ⬜ grey "could not check this image" modal, sending focused |
+| 31 | **Drag a screenshot** from the desktop onto the composer | Amber `ATTACHMENT HELD … via drop`. Same verdict as pasting it. **This path did not exist until B18** |
+| 32 | Export a document containing `AKIAIOSFODNN7EXAMPLE` to PDF, attach it | 🟣 **block**. Preview reads `PDF · 1/1 pages · N characters read from pages` |
+| 33 | Word document, fake SSN, **draw a black box over that line**, export to PDF, attach | 🟠 **warn**, `us ssn`. ShadowGuard reads straight through the redaction rectangle. **The most striking thing in the demo** |
+| 34 | Put a secret only in the PDF's **Author** metadata field, attach | Detected, `sources: ["metadata"]` — nothing visible on any page |
+| 35 | Attach a **scanned** PDF (photograph, no text layer) | ⬜ *"has no text layer … NOT been checked"*. Never *"no sensitive content found"* |
+| 36 | Type `I'm going to paste my password`, send. Then send `hunter2Fake` | 🟠 **warn**, `password`, on the SECOND message. Alone it scores 0 |
+| 37 | Row 36, then wait 5 minutes and send `hunter2Fake` again | **No modal** — priming expired |
+| 38 | Type `charge 4111 1111 1111 1111`, get the warning, **paste a different secret while the modal is open**, click Send anyway | The new text is **re-analysed**, not sent. B1 |
 
 ### The rows that matter most
 
@@ -139,8 +151,23 @@ Backend must be running for rows 1–5.
 - **26** — the whole reason images are intercepted at ATTACH rather than at send (D43). If this
   warns but the image still appears in the composer, the bytes have already reached ChatGPT's
   servers and the warning is theatre.
-- **29** — the image listener sees *every* paste on the page. Cancelling an ordinary text paste
-  would break the site more thoroughly than any false positive.
+- **29** — the attachment listener sees *every* paste on the page. Cancelling an ordinary text
+  paste would break the site more thoroughly than any false positive.
+- **31** — this path was missing for seven weeks and 78 passing tests. `paste` and `change` are the
+  two you picture when you imagine attaching a file; **drag is what people actually do with a file
+  already on their desktop**, which is exactly when it is a document rather than a screenshot
+  ([D54](decisions.md)).
+- **33** — the single most persuasive row in the table. A black rectangle over text does not remove
+  the text, and courts and government agencies have published "redacted" filings that could be
+  un-redacted by selecting it. Every other row catches a secret its sender knew was there; this one
+  catches a secret its sender is **certain they already removed**.
+- **35** — "we read this and it was fine" and "there was nothing to read" must never share a
+  sentence. Collapse them and *print it, scan it, attach it* defeats the entire system in one step.
+- **36** — each message is innocuous alone. Nobody has to be attacking anything; it is simply how
+  people type, which is what makes it the most practical hole the system has had
+  ([D56](decisions.md)).
+- **38** — the bytes sent must be the bytes inspected. Before B1 was closed, this check existed,
+  found the mismatch, wrote to the console, and sent the message anyway.
 
 ---
 

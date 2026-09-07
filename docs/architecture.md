@@ -25,7 +25,7 @@ Three reasons, in order of importance:
 ┌─────────────────── CHROME (tab open on chatgpt.com) ────────────────────────┐
 │                                                                             │
 │   ChatGPT's own React page  ── not our code, we are a guest here            │
-│         ▲  user types / pastes / uploads image                              │
+│         ▲  user types · pastes · picks a file · DRAGS a file in             │
 │         │                                                                   │
 │   ┌─────┴───────────────┐   injects   ┌──────────────────────────┐          │
 │   │   CONTENT SCRIPT    │────────────►│  WARNING MODAL (our UI)  │          │
@@ -40,23 +40,31 @@ Three reasons, in order of importance:
 │   └─────┬───────────────┘                                                   │
 └─────────┼───────────────────────────────────────────────────────────────────┘
           │
-          │  POST /api/v1/analyze
-          │  { text, image_b64?, user_id, platform, trigger, client_version }
+          │  POST /api/v1/analyze · /analyze/image · /analyze/pdf
+          │  { text | file_b64, user_id, conversation_id, platform,
+          │    trigger, client_version }
           ▼
 ┌─────────────────── FASTAPI BACKEND (127.0.0.1:8000) ────────────────────────┐
 │                                                                             │
 │   route handler ──► PIPELINE ORCHESTRATOR                                   │
 │                          │                                                  │
-│    ┌─────────────────────┼──────────────┬──────────────┐                    │
-│    ▼                     ▼              ▼              ▼                    │
-│  STAGE 1              STAGE 2        STAGE 3       STAGE 4                  │
-│  regex + entropy      Presidio       Tesseract     behavioural              │
-│  ~1ms, catches        semantic NER   OCR on        rolling baseline         │
-│  API keys, cards      names, orgs    images        per user                 │
-│    │                     ▲              │              │                    │
-│    │                     └──────────────┘              │                    │
-│    │              OCR text re-enters Stage 1 & 2       │                    │
-│    └─────────────────────┴──────────────┬──────────────┘                    │
+│                          │                                                  │
+│                    CONVERSATION PRIMING — context words from earlier         │
+│                    messages of this chat. In memory, 5 min / 3 msgs,         │
+│                    closed vocabulary only, never message content.            │
+│                          │                                                  │
+│    ┌────────────┬────────┴─────┬──────────────┬──────────────┐              │
+│    ▼            ▼              ▼              ▼              ▼              │
+│  STAGE 1     STAGE 2       STAGE 3       STAGE 3b      STAGE 4              │
+│  regex +     Presidio      Tesseract     PDF parse     behavioural          │
+│  entropy     semantic NER  OCR on        text layer,   rolling baseline     │
+│  ~1ms        names, orgs   images        metadata,     per user             │
+│  API keys                                annotations,  (a multiplier,       │
+│  cards                                   form fields   never a finding)     │
+│    │            ▲              │              │              │              │
+│    │            └──────────────┴──────────────┘              │              │
+│    │      extracted text re-enters Stage 1 & 2               │              │
+│    └────────────┴──────────────┬─────────────────────────────┘              │
 │                                         ▼                                   │
 │                                  STAGE 5: RISK ENGINE                       │
 │                                  weighted fusion → score 0-100              │
@@ -104,16 +112,24 @@ Two consequences that produce real bugs:
 1. Content script's **capture-phase** `keydown` listener on `window` fires *before* ChatGPT's own
    handler. `stopImmediatePropagation()` + `preventDefault()` — the message does not send.
 2. Content script reads the composer text and sends `SG_ANALYZE_REQUEST` to the service worker.
-3. Worker stamps the persistent `user_id` and `fetch()`es `POST /api/v1/analyze`, bounded by a
-   3-second `AbortController` timeout.
+3. Worker stamps the persistent `user_id` **and the conversation key** — `sender.tab.id`, which
+   Chrome populates and the page cannot forge — then `fetch()`es `POST /api/v1/analyze`, bounded
+   by a 3-second `AbortController` timeout. The key matters: the backend carries context words
+   between messages sharing one, so a key the page could choose would let a hostile site read
+   another conversation's priming state by guessing it.
 4. Backend: Stage 1 regex matches the key pattern → entropy confirms high randomness → CRITICAL.
    Because Stage 1 already found a critical secret, the orchestrator short-circuits and skips
    Stage 2 (~50ms of spaCy saved). `stages_run` records what actually ran.
 5. Stage 4 raises risk if this is the 5th such attempt today. Stage 5 fuses → score 95 → `block`.
 6. Event row written to SQLite. JSON returned — **offsets, never the matched text**.
 7. Worker relays to content script → modal renders in a closed Shadow DOM → user clicks Cancel;
-   or on `warn`, Proceed dispatches a synthetic (untrusted) send that the interceptor's
-   `isTrusted` guard lets straight through.
+   or on `warn`, Proceed **re-reads the composer first**. If the text changed while the dialog was
+   open it is analysed again rather than sent, because the bytes transmitted must be the bytes
+   inspected ([D52](decisions.md)). Unchanged, Proceed dispatches a synthetic (untrusted) send
+   that the interceptor's `isTrusted` guard lets straight through.
+8. Afterwards the backend records which **context words** this message mentioned — drawn only from
+   a fixed 71-word vocabulary, never the message — so a secret announced now and pasted in the
+   next message is still caught ([D56](decisions.md)).
 
 ## The central constraint
 
