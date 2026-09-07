@@ -56,3 +56,14 @@ evaluation/data/images/
 
 # ---- Local editor and tool state ----
 # Tool-permission approvals are per-machine, not project source.
+
+# ---- Patent drafts ----
+# NOT versioned, and deliberately so. This repository is intended to be
+# pushed to a PUBLIC GitHub remote. In India a public disclosure before
+# filing destroys novelty (Patents Act 1970, ss. 29-34; the s.31 grace
+# period covers only narrow cases such as display at a government
+# exhibition or a paper read before a learned society). Committing a
+# draft specification here and pushing it would be exactly such a
+# disclosure, made by accident, and it cannot be undone by deleting the
+# file afterwards -- git history and any fork or mirror retain it.
+patent/
