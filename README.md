@@ -107,17 +107,17 @@ like code, and only executable checks notice — which is why a few agreements a
 
 | | |
 |---|---|
-| **Last updated** | 2026-08-23 |
+| **Last updated** | 2026-09-07 |
 | **Review-I** | ✅ **completed 19 Aug 2026** |
 | **Project root** | `/Users/arushitiwari/Desktop/ShadowGuard` |
-| **Git branch** | `main` (86 commits, working tree clean). **Nothing pushed yet** — GitHub push protection rejects the push because `evaluation/data/corpus.jsonl` contains vendor-shaped API keys. They are synthetic (several are character rotations of each other), so this is a false positive of exactly the kind this project measures. Unblock each via the links in the push output, or turn push protection off in repo settings, then `git push -u origin main`. |
+| **Git branch** | `main` (94 commits, working tree clean). **Nothing pushed yet** — GitHub push protection rejects the push because `evaluation/data/corpus.jsonl` contains vendor-shaped API keys. They are synthetic (several are character rotations of each other), so this is a false positive of exactly the kind this project measures. Unblock each via the links in the push output, or turn push protection off in repo settings, then `git push -u origin main`. |
 | **Current stage** | Stages 0–4 live: interception, regex, entropy, semantic, OCR, PDF, risk engine, redaction, persistence — for text, images **and PDFs**, on ChatGPT and (unverified) Gemini. |
-| **Completed** | **Weeks 1–7 complete.** Gemini adapter written but **not verified against the live site**. |
-| **Next task** | **Week 8 — hardening, report, diagrams, demo.** Also open: live-verify the Gemini adapter, improve OCR retention for `GOOGLE_API_KEY` and `JWT` (both 0%, bypass B11) |
+| **Completed** | **Weeks 1–7 complete**, plus post-review hardening: bypasses B1, B18 and B19 closed, PDF inspection added (Stage 3b), dashboard shipped. Gemini adapter written but **not verified against the live site**. |
+| **Next task** | **The documents, not the code.** The report and slides still quote Review-I numbers (98.1% on 210 samples, regex-only 82.9%) against a system now measured at 98.3% on 230 with regex-only 75.7%, and mention neither PDF inspection nor conversation priming. `docs/diagrams/` is empty and `docs/demo.md` is Review-I specific with stale expected output. Engineering is ahead; the deliverables are behind. |
 | **Tests** | **369 Python** (`pytest -q`) · **82 JavaScript** (`npm test`) · extension **v0.14.0** |
 | **Measured** | 230-sample corpus — text: recall **98.3%**, FPR **0%**, F1 **99.1%** (regex alone **75.7%**) · images: OCR retention **93.9%**, OCR-induced FPR **2.0%** |
 | **Deadline** | ~2026-09-20 (8 weeks from 2026-07-26) |
-| **Weeks elapsed** | **3.3 of 8**, with 6 weeks of plan delivered — well ahead |
+| **Weeks elapsed** | **6.0 of 8** (26 Jul → 7 Sep), with all 8 weeks of engineering delivered. **13 days to the ~20 Sep deadline.** |
 
 ### What actually runs today
 
