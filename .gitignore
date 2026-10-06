@@ -67,3 +67,6 @@ evaluation/data/images/
 # disclosure, made by accident, and it cannot be undone by deleting the
 # file afterwards -- git history and any fork or mirror retain it.
 patent/
+
+# Generated report artefact — rebuilt from docs/project-1-report.md by tools/build-report.js
+ShadowGuard AI - Project-1 Report.docx
