@@ -70,3 +70,9 @@ patent/
 
 # Generated report artefact — rebuilt from docs/project-1-report.md by tools/build-report.js
 ShadowGuard AI - Project-1 Report.docx
+
+# ---- Report and review material ----
+# Coursework deliverables. Kept on disk, deliberately not versioned here.
+docs/project-1-*
+docs/review-1-*
+tools/build-report.js
